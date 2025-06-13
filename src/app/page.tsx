@@ -33,11 +33,15 @@ export default function HomePage() {
       try {
         const parsedTasks = JSON.parse(storedTasks);
         if (Array.isArray(parsedTasks)) {
-          setTasks(parsedTasks);
+           const tasksWithIds = parsedTasks.map(t => ({
+            ...t,
+            id: t.id || crypto.randomUUID() // Ensure tasks have IDs
+          }));
+          setTasks(tasksWithIds);
         }
       } catch (error) {
         console.error("Failed to parse tasks from localStorage", error);
-        localStorage.removeItem(LOCAL_STORAGE_KEY); 
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
     }
   }, []);
@@ -61,39 +65,60 @@ export default function HomePage() {
   };
 
   const handleToggleComplete = (id: string) => {
+    let toggledTaskDescription = "";
+    let newCompletedState = false;
+
     setTasks((prevTasks) =>
-      prevTasks.map((task) =>
-        task.id === id ? { ...task, completed: !task.completed } : task
-      )
+      prevTasks.map((task) => {
+        if (task.id === id) {
+          toggledTaskDescription = task.text;
+          newCompletedState = !task.completed;
+          return { ...task, completed: !task.completed };
+        }
+        return task;
+      })
     );
-    const updatedTask = tasks.find(task => task.id === id);
-    if (updatedTask) {
+
+    if (toggledTaskDescription) {
       toast({
-        title: `Task ${updatedTask.completed ? "marked as incomplete" : "completed!"}`,
-        description: `"${updatedTask.text}" state updated.`,
+        title: `Task ${newCompletedState ? "completed!" : "marked as incomplete"}`,
+        description: `"${toggledTaskDescription}" state updated.`,
+      });
+    } else {
+      // This case should ideally not happen if ID is always valid
+      console.warn(`Task with ID ${id} not found for toggling.`);
+      toast({
+        title: "Error",
+        description: "Could not find the task to toggle.",
+        variant: "destructive",
       });
     }
   };
 
   const handleDeleteTask = (id: string) => {
     const taskToDelete = tasks.find(task => task.id === id);
-    setTasks((prevTasks) => prevTasks.filter((task) => task.id !== id));
-    if (taskToDelete) {
+
+    if (!taskToDelete) {
+      console.warn(`Task with ID ${id} not found for deletion.`);
       toast({
-        title: "Task deleted",
-        description: `"${taskToDelete.text}" has been removed.`,
-        variant: "destructive"
+        title: "Error",
+        description: "Could not find the task to delete.",
+        variant: "destructive",
       });
-    } else {
-      toast({
-        title: "Task deleted",
-        description: "The task has been removed from your list.",
-        variant: "destructive"
-      });
+      return;
     }
+
+    setTasks((prevTasks) => prevTasks.filter((task) => task.id !== id));
+
+    toast({
+      title: "Task deleted",
+      description: `"${taskToDelete.text}" has been removed.`,
+      variant: "destructive"
+    });
   };
 
   const handleUpdateTaskText = (id: string, newText: string) => {
+    // TaskItemDisplay already ensures this is called only if text is different.
     setTasks((prevTasks) =>
       prevTasks.map((task) => (task.id === id ? { ...task, text: newText } : task))
     );
@@ -104,6 +129,15 @@ export default function HomePage() {
   };
 
   const handleGetTaskInsight = async (task: Task) => {
+    if (!task || !task.id) {
+      console.error("Invalid task provided for insight:", task);
+      toast({
+        title: "Error",
+        description: "Cannot get insights for an invalid task.",
+        variant: "destructive",
+      });
+      return;
+    }
     setTaskForInsight(task);
     setIsInsightDialogOpen(true);
     setIsLoadingInsight(true);
@@ -116,7 +150,7 @@ export default function HomePage() {
       setInsightData(insight);
     } catch (error) {
       console.error("Failed to get task insight:", error);
-      setInsightData(null); 
+      setInsightData(null);
       toast({
         title: "Error fetching insight",
         description: "Could not retrieve AI insights for this task. Please try again.",
@@ -130,7 +164,7 @@ export default function HomePage() {
   const handleAddSubTasksToList = (subTaskTexts: string[], parentTaskText: string) => {
     const newSubTasks: Task[] = subTaskTexts.map(text => ({
       id: crypto.randomUUID(),
-      text: `Sub-task for "${parentTaskText}": ${text}`, 
+      text: `Sub-task for "${parentTaskText}": ${text}`,
       completed: false,
     }));
     setTasks(prevTasks => [...newSubTasks, ...prevTasks]);
@@ -138,12 +172,12 @@ export default function HomePage() {
       title: "Sub-tasks added!",
       description: `${newSubTasks.length} sub-tasks related to "${parentTaskText}" have been added to your list.`,
     });
-    setAiMessage(null); 
+    setAiMessage(`${newSubTasks.length} sub-tasks from AI insight added to your main list!`);
   };
 
   const handleClearList = () => {
     setTasks([]);
-    setAiMessage(null);
+    setAiMessage(null); // Clear any AI message
     toast({
       title: "List Cleared",
       description: "All tasks have been removed.",
@@ -154,8 +188,8 @@ export default function HomePage() {
     <div className="flex flex-col flex-grow">
       <Header onClearList={handleClearList} taskCount={tasks.length} />
       <main className="container mx-auto px-4 py-6 flex-grow flex flex-col gap-6">
-        <TaskForm 
-          onListCreated={handleListCreated} 
+        <TaskForm
+          onListCreated={handleListCreated}
           isProcessing={isFormProcessing}
           setIsProcessing={setIsFormProcessing}
         />

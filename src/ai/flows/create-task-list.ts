@@ -89,11 +89,11 @@ The schema includes:
     *   Do NOT create a task from these greetings.
 
 4.  **Query - Task Count (Informational):**
-    *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have"):
-        *   Set the 'action' field to "query_task_count". THIS IS VERY IMPORTANT. The 'action' MUST be "query_task_count".
+    *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have", "how many tsk i have?"):
+        *   The 'action' field in your JSON output MUST BE "query_task_count". THIS IS ABSOLUTELY CRITICAL.
         *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field MUST be exactly: "You're asking about your task count. The application will provide this information." The client application will construct the final message with the actual count.
-    *   Do NOT create a task like "How many tasks do I have". This is an informational query. Ensure 'action' is "query_task_count".
+        *   The 'reasoning' field MUST be exactly: "You're asking about your task count. The application will provide this information." (The client application will construct the final message with the actual count based on the 'action' being "query_task_count".)
+    *   Do NOT create a task like "How many tasks do I have". This is an informational query. Ensure 'action' is "query_task_count". This rule is very important for the application to function correctly.
 
 5.  **Single Conceptual Task Identification (Action: "add_tasks"):**
     *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
@@ -135,7 +135,10 @@ Prompt: "{{{prompt}}}"
 Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format.
 Ensure 'taskList' is always an array of strings.
 Set the 'action' field appropriately based on the rules above. If no specific command, greeting, or query is detected or the intent is task creation, 'action' should be "add_tasks" or can be omitted.
-Prioritize Rules 1, 2, 3 and 4 for command/greeting/query detection. For Rule 4 (Task Count Query), it is CRITICAL that the 'action' field is set to "query_task_count". For Rule 3 (Greeting), it is CRITICAL that 'action' is "no_action_conversational_reply".
+Prioritize Rules 1, 2, 3 and 4 for command/greeting/query detection. 
+For Rule 4 (Task Count Query), it is CRITICAL that the 'action' field is set to "query_task_count" and the 'reasoning' field is exactly "You're asking about your task count. The application will provide this information.". 
+For Rule 3 (Greeting), it is CRITICAL that 'action' is "no_action_conversational_reply".
+These prioritizations are essential for correct application behavior.
 `,
 });
 

@@ -18,7 +18,7 @@ const LOCAL_STORAGE_KEY = "pocketTasksAI_tasks";
 export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
-  const [isFormProcessing, setIsFormProcessing] = useState<boolean>(false); // Re-added this line
+  const [isFormProcessing, setIsFormProcessing] = useState<boolean>(false);
 
   const [taskForInsight, setTaskForInsight] = useState<Task | null>(null);
   const [insightData, setInsightData] = useState<TaskInsightOutput | null>(null);
@@ -74,11 +74,45 @@ export default function HomePage() {
     });
   }, [toast, setAiMessage]);
 
+  const handleCompleteAllTasks = useCallback(() => {
+    setTasks(currentTasks => {
+      if (currentTasks.length === 0) {
+        toast({
+          title: "No tasks to complete",
+          description: "Your list is empty.",
+        });
+        setAiMessage("Your list is empty, so there are no tasks to complete.");
+        return currentTasks;
+      }
+      if (currentTasks.every(task => task.completed)) {
+        toast({
+          title: "All tasks already completed",
+          description: "There are no pending tasks to mark as complete.",
+        });
+        setAiMessage("Looks like all your tasks are already done!");
+        return currentTasks;
+      }
+      
+      const allCompleted = currentTasks.map(task => ({ ...task, completed: true }));
+      toast({
+        title: "All Tasks Completed!",
+        description: "Great job, everything is marked as done!",
+      });
+      setAiMessage("Fantastic! I've marked all your tasks as completed.");
+      return allCompleted;
+    });
+  }, [toast, setAiMessage]);
+
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
     if (data.action === "clear_all_tasks") {
       handleClearList(); 
       if (data.reasoning) {
           setAiMessage(data.reasoning); 
+      }
+    } else if (data.action === "complete_all_tasks") {
+      handleCompleteAllTasks();
+      if (data.reasoning) {
+        setAiMessage(data.reasoning);
       }
     } else { 
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
@@ -113,7 +147,7 @@ export default function HomePage() {
         });
       }
     }
-  }, [toast, handleClearList, setAiMessage]);
+  }, [toast, handleClearList, handleCompleteAllTasks, setAiMessage]);
 
 
   const handleToggleComplete = useCallback((id: string) => {
@@ -254,7 +288,7 @@ export default function HomePage() {
         <TaskForm
           onListCreated={handleListCreated}
           isProcessing={isFormProcessing}
-          setIsProcessing={setIsFormProcessing} // Re-added this prop
+          setIsProcessing={setIsFormProcessing}
         />
 
         {aiMessage && !isFormProcessing && (

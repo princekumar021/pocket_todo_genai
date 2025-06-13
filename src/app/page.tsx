@@ -9,6 +9,7 @@ import TaskListDisplay from "@/components/task-list-display";
 import TaskInsightDialog from "@/components/task-insight-dialog";
 import { provideTaskInsight, TaskInsightOutput } from "@/ai/flows/task-insight";
 import { createTasklist, CreateTaskListOutput } from "@/ai/flows/create-task-list";
+import { recordTaskEvent } from "@/ai/flows/record-task-event"; // Import the new flow
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from "lucide-react";
@@ -65,9 +66,7 @@ export default function HomePage() {
         return currentTasks; 
       }
       
-      // Note: aiMessage is set by handleListCreated when called via AI
-      // or here if called directly by the header button.
-      if (!aiMessage) { // Only set if not already set by AI flow
+      if (!aiMessage) {
          setAiMessage("All tasks have been cleared from your list.");
       }
       toast({
@@ -76,52 +75,61 @@ export default function HomePage() {
       });
       return []; 
     });
-  }, [toast, aiMessage, setAiMessage]); // Added aiMessage to dependency to avoid stale closure if needed for check
+  }, [toast, aiMessage, setAiMessage]);
 
   const handleCompleteAllTasks = useCallback(() => {
     setTasks(currentTasks => {
       if (currentTasks.length === 0) {
-        toast({
-          title: "No tasks to complete",
-          description: "Your list is empty.",
-        });
-        // aiMessage will be set by handleListCreated
+        // Toast will be handled by handleListCreated if called by AI
+        // AI message will be set by handleListCreated
         return currentTasks;
       }
       if (currentTasks.every(task => task.completed)) {
-        toast({
-          title: "All tasks already completed",
-          description: "There are no pending tasks to mark as complete.",
-        });
-        // aiMessage will be set by handleListCreated
+        // Toast will be handled by handleListCreated if called by AI
+        // AI message will be set by handleListCreated
         return currentTasks;
       }
       
       const allCompleted = currentTasks.map(task => ({ ...task, completed: true }));
-      toast({
-        title: "All Tasks Completed!",
-        description: "Great job, everything is marked as done!",
-      });
-      // aiMessage will be set by handleListCreated using AI's reasoning
+      // Toast for success will be handled by handleListCreated using AI's reasoning
+      // AI message will be set by handleListCreated using AI's reasoning
       return allCompleted;
     });
-  }, [toast]);
+  }, []);
+
 
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
-    let messageToSet = data.reasoning; // Start with AI's reasoning
+    let messageToSet = data.reasoning; 
 
     if (data.action === "clear_all_tasks") {
-      if (!messageToSet) { // Fallback if AI didn't provide reasoning
+      if (!messageToSet) { 
         messageToSet = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
       }
-      setAiMessage(messageToSet); // Set AI message before calling clear list
+      setAiMessage(messageToSet); 
       handleClearList(); 
-    } else if (data.action === "complete_all_tasks") {
-      if (!messageToSet) { // Fallback if AI didn't provide reasoning
-        messageToSet = "Okay, I've processed your request to mark all tasks as completed. All tasks will be updated.";
+      if (tasks.length > 0) { // Only toast if there were tasks to clear
+        toast({ title: "List Cleared", description: "All tasks have been removed." });
+      } else {
+        toast({ title: "List is already empty", description: "There are no tasks to remove." });
       }
-      setAiMessage(messageToSet); // Set AI message before calling complete all
+    } else if (data.action === "complete_all_tasks") {
+      if (!messageToSet) { 
+        messageToSet = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated.";
+      }
+      setAiMessage(messageToSet); 
+      const currentTaskCount = tasks.length;
+      const allTasksAlreadyCompleted = tasks.every(task => task.completed);
+
       handleCompleteAllTasks();
+
+      if (currentTaskCount === 0) {
+        toast({ title: "No tasks to complete", description: "Your list is empty." });
+      } else if (allTasksAlreadyCompleted) {
+         toast({ title: "All tasks already completed", description: "There are no pending tasks to mark as complete." });
+      } else {
+        toast({ title: "All Tasks Completed!", description: "Great job, everything is marked as done!" });
+      }
+
     } else { 
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
 
@@ -134,7 +142,7 @@ export default function HomePage() {
           }));
           return [...newTasks, ...prevTasks];
         });
-        if (!messageToSet) { // Fallback if AI didn't provide reasoning
+        if (!messageToSet) { 
            messageToSet = tasksToAdd.length === 1 
             ? `Okay, I've added '${tasksToAdd[0]}' to your list. You can get more details or a breakdown using the info button!`
             : `Alright, I've drafted a plan with ${tasksToAdd.length} task(s) for you!`;
@@ -150,14 +158,14 @@ export default function HomePage() {
           description: messageToSet,
         });
       } else {
-         toast({ // AI provided reasoning, but no tasks were added
+         toast({ 
           title: "AI Assistant",
           description: messageToSet,
         });
       }
       setAiMessage(messageToSet);
     }
-  }, [toast, handleClearList, handleCompleteAllTasks, setAiMessage]);
+  }, [toast, handleClearList, handleCompleteAllTasks, setAiMessage, tasks]);
 
 
   const handleToggleComplete = useCallback((id: string) => {
@@ -180,6 +188,19 @@ export default function HomePage() {
         title: `Task ${newCompletedState ? "completed!" : "marked incomplete"}`,
         description: `"${toggledTaskDescription}" state updated.`,
       });
+
+      // Record event for AI history
+      recordTaskEvent({
+        task_id: id,
+        task_text: toggledTaskDescription,
+        event_type: newCompletedState ? "completed" : "uncompleted",
+        timestamp: new Date().toISOString(),
+      }).then(response => {
+        console.log('AI History: Task event recorded:', response);
+      }).catch(error => {
+        console.error('AI History: Error recording task event:', error);
+      });
+
     } else {
       console.warn(`Task with ID ${id} not found for toggling.`);
       toast({
@@ -188,7 +209,7 @@ export default function HomePage() {
         variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [toast]); // recordTaskEvent is stable, no need to add to deps unless it becomes unstable
 
   const handleDeleteTask = useCallback((id: string) => {
     let deletedTaskDescription = "";

@@ -64,17 +64,17 @@ The schema includes:
 **Core Logic & Rules:**
 
 1.  **Command Detection - Clear List:**
-    *   If the user's prompt is a very clear and direct command to "delete all tasks", "clear all tasks", "clear my list", "remove all tasks", or similar explicit phrasing for clearing the entire list:
+    *   If the user's prompt very clearly and directly indicates a desire to delete, clear, or remove all tasks from their list (e.g., "delete all tasks", "clear all my tasks", "remove every task", "empty my list", "clear all task"), then:
         *   Set the 'action' field to "clear_all_tasks".
         *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to clear all tasks. The list will be emptied."
-    *   **Do not** create a task named "Delete all tasks".
+        *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to clear all tasks. Your list will be emptied."
+    *   **Do not** create a task named "Delete all tasks" or similar if the intent is to clear the list.
 
 2.  **Single Conceptual Task Identification (Action: "add_tasks"):**
     *   If the prompt describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome"), and it's NOT a clear command (like clearing the list):
         *   Set the 'action' field to "add_tasks" (or omit it, as "add_tasks" is the default).
         *   The 'taskList' output should contain **ONLY ONE** string representing that main task.
-        *   Example: User: "buy milk" -> AI \`taskList\`: \`["Buy milk"]\`, \`action\`: \`"add_tasks"\`
+        *   Example: User: "buy milk" -> AI \`taskList\` output: \`["Buy milk"]\`, \`action\`: \`"add_tasks"\`
         *   The 'reasoning' field should be like: "Okay, I've added '[Task Name]' to your list. You can get more details or a breakdown using the info button!"
     *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns.
 
@@ -144,3 +144,4 @@ const createTasklistFlow = ai.defineFlow(
     }
   }
 );
+

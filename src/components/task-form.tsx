@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,9 +15,9 @@ import {
 } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { createTasklist, CreateTaskListOutput } from "@/ai/flows/create-task-list";
-import type { Sparkles } from "lucide-react";
-import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Sparkles, Loader2 } from "lucide-react"; // Correctly import Sparkles
+import { useToast } from "@/hooks/use-toast";
+
 
 const FormSchema = z.object({
   prompt: z.string().min(10, {
@@ -31,6 +32,7 @@ interface TaskFormProps {
 }
 
 export default function TaskForm({ onListCreated, isProcessing, setIsProcessing }: TaskFormProps) {
+  const { toast } = useToast();
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
     defaultValues: {
@@ -43,10 +45,14 @@ export default function TaskForm({ onListCreated, isProcessing, setIsProcessing 
     try {
       const result = await createTasklist({ prompt: data.prompt });
       onListCreated(result);
-      form.reset(); // Reset form after successful submission
+      form.reset(); 
     } catch (error) {
       console.error("Failed to create task list:", error);
-      // Optionally, show an error toast to the user
+      toast({
+        title: "Error generating tasks",
+        description: "The AI could not generate tasks for your prompt. Please try again or rephrase your request.",
+        variant: "destructive",
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -77,7 +83,7 @@ export default function TaskForm({ onListCreated, isProcessing, setIsProcessing 
           {isProcessing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Generating...
+              Generating with AI...
             </>
           ) : (
             <>
@@ -90,26 +96,3 @@ export default function TaskForm({ onListCreated, isProcessing, setIsProcessing 
     </Form>
   );
 }
-
-// Dummy Sparkles component if not available or to avoid direct lucide import here if preferred
-const Sparkles = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    {...props}
-  >
-    <path d="M12 3L9.5 8.5L4 11L9.5 13.5L12 19L14.5 13.5L20 11L14.5 8.5L12 3Z" />
-    <path d="M5 3L3 5" />
-    <path d="M19 3L21 5" />
-    <path d="M5 21L3 19" />
-    <path d="M19 21L21 19" />
-  </svg>
-);
-

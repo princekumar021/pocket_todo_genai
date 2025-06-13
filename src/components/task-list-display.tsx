@@ -1,9 +1,10 @@
+
 "use client";
 
 import type { Task } from "@/lib/types";
 import TaskItemDisplay from "./task-item-display";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import Image from "next/image";
+import { ListX } from "lucide-react"; // Using a more appropriate icon
 
 interface TaskListDisplayProps {
   tasks: Task[];
@@ -22,17 +23,12 @@ export default function TaskListDisplay({
 }: TaskListDisplayProps) {
   if (tasks.length === 0) {
     return (
-      <div className="text-center py-10 px-4">
-        <Image 
-          src="https://placehold.co/300x200.png" 
-          alt="Empty task list placeholder" 
-          width={300} 
-          height={200} 
-          className="mx-auto mb-6 rounded-lg shadow-md"
-          data-ai-hint="empty checklist" 
-        />
+      <div className="text-center py-10 px-4 flex flex-col items-center justify-center text-muted-foreground h-full">
+        <ListX className="h-16 w-16 mb-4 text-primary/50" />
         <h3 className="text-xl font-semibold text-foreground mb-2">Your task list is empty!</h3>
-        <p className="text-muted-foreground">Use the form above to generate tasks with AI, or add them manually.</p>
+        <p className="text-center max-w-md">
+          Use the form above to generate tasks with AI, or get started by typing out what you need to do.
+        </p>
       </div>
     );
   }

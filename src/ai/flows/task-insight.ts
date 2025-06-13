@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -13,14 +14,15 @@ import {z} from 'genkit';
 
 const TaskInsightInputSchema = z.object({
   task: z.string().describe('The task to provide insights for.'),
-  taskList: z.string().describe('The list containing the task.'),
+  taskList: z.string().describe('The list containing the task, providing context.'),
 });
 export type TaskInsightInput = z.infer<typeof TaskInsightInputSchema>;
 
 const TaskInsightOutputSchema = z.object({
-  estimatedTimeToComplete: z.string().describe('The estimated time to complete the task.'),
-  potentialDependencies: z.string().describe('Potential dependencies for the task.'),
-  additionalNotes: z.string().describe('Any additional notes or considerations for the task.'),
+  estimatedTimeToComplete: z.string().describe('The estimated time to complete the task (e.g., "approx. 1 hour", "2-3 days").'),
+  potentialDependencies: z.string().describe('Potential dependencies for the task based on the task itself and the broader task list.'),
+  additionalNotes: z.string().describe('Any additional notes, considerations, or a general summary of the insight.'),
+  subTasks: z.array(z.string()).optional().describe('A list of sub-tasks, ingredients, or breakdown steps, if applicable to the main task. For example, ingredients for a recipe or steps for a project.'),
 });
 export type TaskInsightOutput = z.infer<typeof TaskInsightOutputSchema>;
 
@@ -32,12 +34,21 @@ const prompt = ai.definePrompt({
   name: 'taskInsightPrompt',
   input: {schema: TaskInsightInputSchema},
   output: {schema: TaskInsightOutputSchema},
-  prompt: `You are a personal task management assistant. You will provide insights to the user for a given task in their to-do list such as the estimated time to complete, potential dependencies and additional notes.
+  prompt: `You are a helpful task management assistant. For the given task, provide detailed insights.
 
-  Task: {{{task}}}
-  Task List: {{{taskList}}}
-  \n\
-  Provide your response in a detailed paragraph format.
+Task: {{{task}}}
+Context of other tasks in the list (if any): {{{taskList}}}
+
+Please analyze the task and provide the following information in the structured output format:
+1.  'estimatedTimeToComplete': Estimate the time required to complete this task (e.g., "approx. 45 minutes", "about 2 hours", "1-2 days").
+2.  'potentialDependencies': Identify any potential dependencies this task might have, considering the task itself and the overall task list.
+3.  'subTasks':
+    *   If the task is a recipe (e.g., "make chicken soup", "bake a chocolate cake"), list the main ingredients as sub-tasks.
+    *   If the task is a project, a learning goal, or something that can be broken down into smaller steps (e.g., "write a research paper on AI", "learn basics of quantum physics", "plan a 15-day study schedule for DSC"), list the key actionable steps or components as sub-tasks.
+    *   If no specific sub-tasks are applicable or the task is too simple, leave this field empty or undefined.
+4.  'additionalNotes': Provide any other relevant notes, considerations, a brief summary of the task's nature, or helpful tips.
+
+Ensure your response strictly adheres to the requested output schema.
   `,
 });
 

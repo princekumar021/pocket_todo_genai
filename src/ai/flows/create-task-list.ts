@@ -71,7 +71,7 @@ The schema includes:
     *   **Crucially: Do NOT** create a task named "Delete all tasks", "Clear all tasks", or similar if the intent is to clear the list. This rule overrides all other rules if a clear command is detected.
 
 2.  **Command Detection - Mark All Tasks Complete (High Precedence):**
-    *   If the user's prompt clearly indicates a desire to mark all tasks as completed (e.g., "make all tasks completed", "complete all tasks", "mark all as done", "finish all tasks", "mark all tasks as complete", "make all the task as completed", "complete every task"):
+    *   If the user's prompt clearly indicates a desire to mark all tasks as completed (e.g., "make all tasks completed", "complete all tasks", "mark all as done", "finish all tasks", "mark all tasks as complete", "make all the task as completed", "complete every task", "mark everything as done", "all tasks done"):
         *   Set the 'action' field to "complete_all_tasks".
         *   The 'taskList' field MUST be an empty array (\`[]\`).
         *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to mark all tasks as completed. All tasks will be updated."
@@ -138,7 +138,7 @@ const createTasklistFlow = ai.defineFlow(
         if (action === "clear_all_tasks") {
           reasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
         } else if (action === "complete_all_tasks") {
-          reasoning = "Okay, I've processed your request to mark all tasks as completed. All tasks will be updated.";
+          reasoning = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated accordingly.";
         } else if (taskList.length > 0) {
            if (taskList.length === 1 && action === "add_tasks") {
             reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
@@ -158,7 +158,6 @@ const createTasklistFlow = ai.defineFlow(
       return { taskList, reasoning, action };
     } catch (error) {
       console.error("Error calling AI model in createTasklistFlow:", error);
-      // Check if the error is an object and has a message property
       const errorMessage = (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string')
         ? error.message
         : 'An unknown error occurred with the AI service.';

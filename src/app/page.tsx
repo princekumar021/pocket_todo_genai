@@ -65,14 +65,18 @@ export default function HomePage() {
         return currentTasks; 
       }
       
-      setAiMessage("All tasks have been cleared from your list.");
+      // Note: aiMessage is set by handleListCreated when called via AI
+      // or here if called directly by the header button.
+      if (!aiMessage) { // Only set if not already set by AI flow
+         setAiMessage("All tasks have been cleared from your list.");
+      }
       toast({
         title: "List Cleared",
         description: "All tasks have been removed.",
       });
       return []; 
     });
-  }, [toast, setAiMessage]);
+  }, [toast, aiMessage, setAiMessage]); // Added aiMessage to dependency to avoid stale closure if needed for check
 
   const handleCompleteAllTasks = useCallback(() => {
     setTasks(currentTasks => {
@@ -81,7 +85,7 @@ export default function HomePage() {
           title: "No tasks to complete",
           description: "Your list is empty.",
         });
-        setAiMessage("Your list is empty, so there are no tasks to complete.");
+        // aiMessage will be set by handleListCreated
         return currentTasks;
       }
       if (currentTasks.every(task => task.completed)) {
@@ -89,7 +93,7 @@ export default function HomePage() {
           title: "All tasks already completed",
           description: "There are no pending tasks to mark as complete.",
         });
-        setAiMessage("Looks like all your tasks are already done!");
+        // aiMessage will be set by handleListCreated
         return currentTasks;
       }
       
@@ -98,22 +102,26 @@ export default function HomePage() {
         title: "All Tasks Completed!",
         description: "Great job, everything is marked as done!",
       });
-      setAiMessage("Fantastic! I've marked all your tasks as completed.");
+      // aiMessage will be set by handleListCreated using AI's reasoning
       return allCompleted;
     });
-  }, [toast, setAiMessage]);
+  }, [toast]);
 
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
+    let messageToSet = data.reasoning; // Start with AI's reasoning
+
     if (data.action === "clear_all_tasks") {
+      if (!messageToSet) { // Fallback if AI didn't provide reasoning
+        messageToSet = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
+      }
+      setAiMessage(messageToSet); // Set AI message before calling clear list
       handleClearList(); 
-      if (data.reasoning) {
-          setAiMessage(data.reasoning); 
-      }
     } else if (data.action === "complete_all_tasks") {
-      handleCompleteAllTasks();
-      if (data.reasoning) {
-        setAiMessage(data.reasoning);
+      if (!messageToSet) { // Fallback if AI didn't provide reasoning
+        messageToSet = "Okay, I've processed your request to mark all tasks as completed. All tasks will be updated.";
       }
+      setAiMessage(messageToSet); // Set AI message before calling complete all
+      handleCompleteAllTasks();
     } else { 
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
 
@@ -126,26 +134,28 @@ export default function HomePage() {
           }));
           return [...newTasks, ...prevTasks];
         });
-        const message = data.reasoning || `AI has added ${tasksToAdd.length} task(s) to your list!`;
-        setAiMessage(message);
+        if (!messageToSet) { // Fallback if AI didn't provide reasoning
+           messageToSet = tasksToAdd.length === 1 
+            ? `Okay, I've added '${tasksToAdd[0]}' to your list. You can get more details or a breakdown using the info button!`
+            : `Alright, I've drafted a plan with ${tasksToAdd.length} task(s) for you!`;
+        }
         toast({
           title: "Tasks Added!",
-          description: message,
+          description: messageToSet,
         });
-      } else if (data.reasoning) {
-        setAiMessage(data.reasoning);
+      } else if (!messageToSet) {
+        messageToSet = "AI processed your request, but no new tasks were added.";
         toast({
           title: "AI Assistant",
-          description: data.reasoning,
+          description: messageToSet,
         });
       } else {
-        const message = "AI processed your request, but no new tasks were added.";
-        setAiMessage(message);
-        toast({
+         toast({ // AI provided reasoning, but no tasks were added
           title: "AI Assistant",
-          description: message,
+          description: messageToSet,
         });
       }
+      setAiMessage(messageToSet);
     }
   }, [toast, handleClearList, handleCompleteAllTasks, setAiMessage]);
 

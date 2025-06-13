@@ -16,11 +16,11 @@ import {z} from 'genkit';
 /**
  * Defines the input schema for the task creation flow.
  * @property {string} prompt - A user's natural language request for tasks or a command.
- * @property {number} [currentTaskCount] - The current number of tasks the user has.
+ * @property {number} [currentTaskCount] - The current number of tasks the user has. Used for queries about task count.
  */
 const CreateTaskListInputSchema = z.object({
   prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list, or a command like "delete all tasks", "complete all tasks", or a query like "how many tasks do I have?".'),
-  currentTaskCount: z.number().optional().describe('The current number of tasks the user has. Used for queries about task count.'),
+  currentTaskCount: z.number().optional().describe('The current number of tasks the user has. Used for queries about task count. This might be slightly delayed from the absolute current count if tasks were just added client-side.'),
 });
 export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
 
@@ -55,7 +55,7 @@ const prompt = ai.definePrompt({
 You are an expert personal assistant that converts user requests into structured to-do lists OR recognizes specific commands OR answers specific queries.
 
 Your main goal is to determine the user's intent based on their prompt.
-The user might provide 'currentTaskCount' which is the number of tasks they currently have.
+The user might provide 'currentTaskCount' which is the number of tasks they currently have. This count might be slightly stale if tasks were just added on the client.
 
 **Output Structure:**
 You MUST respond with a JSON object adhering to the 'CreateTaskListOutputSchema'.
@@ -84,9 +84,7 @@ The schema includes:
     *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have"):
         *   Set the 'action' field to "query_task_count".
         *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field should directly state the number of tasks using the provided 'currentTaskCount'.
-            *   If 'currentTaskCount' is provided and greater than 0, respond with something like: "You currently have {{currentTaskCount}} tasks." or "Okay, I see you have {{currentTaskCount}} tasks on your list."
-            *   If 'currentTaskCount' is 0 or not provided, respond with: "You currently have no tasks." or "It looks like your task list is empty right now."
+        *   The 'reasoning' field should indicate that the user is asking for the count, e.g., "You're asking about your task count. The application will provide this information." The client application will construct the final message with the actual count.
     *   Do NOT create a task like "How many tasks do I have". This is an informational query.
 
 4.  **Single Conceptual Task Identification (Action: "add_tasks"):**
@@ -123,7 +121,7 @@ The schema includes:
 
 **User Input:**
 Prompt: "{{{prompt}}}"
-{{#if currentTaskCount}}Current task count: {{{currentTaskCount}}}{{/if}}
+{{#if currentTaskCount}}User's client reported task count: {{{currentTaskCount}}} (may be slightly stale for task count queries){{/if}}
 
 **Instructions:**
 Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format.
@@ -141,7 +139,6 @@ const createTasklistFlow = ai.defineFlow(
   },
   async (input: CreateTaskListInput) => {
     try {
-      // Pass the full input (including currentTaskCount if present) to the prompt
       const {output} = await prompt(input);
       
       const taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
@@ -154,12 +151,7 @@ const createTasklistFlow = ai.defineFlow(
         } else if (action === "complete_all_tasks") {
           reasoning = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated accordingly.";
         } else if (action === "query_task_count") {
-          // The AI should provide reasoning with the count. This is a fallback.
-          if (typeof input.currentTaskCount === 'number' && input.currentTaskCount > 0) {
-            reasoning = `You currently have ${input.currentTaskCount} task(s).`;
-          } else {
-            reasoning = "It looks like your task list is empty.";
-          }
+          reasoning = "You're asking about your task count. The application will provide this information.";
         } else if (taskList.length > 0) {
            if (taskList.length === 1 && action === "add_tasks") {
             reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;

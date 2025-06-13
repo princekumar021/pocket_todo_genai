@@ -13,7 +13,7 @@ import {z} from 'genkit';
 
 const RecordTaskEventInputSchema = z.object({
   task_id: z.string().describe('The ID of the task.'),
-  task_text: z.string().describe('The text content of the task.'),
+  task_text: z.string().describe('The text content of the task (original text for updates).'),
   event_type: z.enum(["completed", "uncompleted", "created", "deleted", "text_updated"])
     .describe('The type of event that occurred.'),
   new_text: z.string().optional().describe('The new text if the event is "text_updated".'),
@@ -49,3 +49,4 @@ const recordTaskEventFlow = ai.defineFlow(
     };
   }
 );
+

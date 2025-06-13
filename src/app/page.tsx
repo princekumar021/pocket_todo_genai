@@ -103,11 +103,20 @@ export default function HomePage() {
       }
       setAiMessage(messageToSet); 
     } else if (data.action === "query_task_count") {
-      // The AI flow now provides the reasoning with the count
-      if (!messageToSet) {
-         // Fallback, though AI should ideally provide this.
-        messageToSet = `You currently have ${tasks.length} task(s).`;
+      // Construct message locally for real-time accuracy
+      const currentTaskCount = tasks.length;
+      if (currentTaskCount > 0) {
+        messageToSet = `You currently have ${currentTaskCount} task${currentTaskCount === 1 ? '' : 's'}.`;
+      } else {
+        messageToSet = "You currently have no tasks.";
       }
+      
+      if (data.reasoning && data.reasoning !== "You're asking about your task count. The application will provide this information.") {
+        // If AI provides more specific reasoning (e.g. an error message), append it or prioritize it.
+        // For now, we'll stick to the client-generated message for accuracy.
+        console.log("AI reasoning for task count query:", data.reasoning);
+      }
+
       setAiMessage(messageToSet);
       toast({
         title: "AI Assistant",
@@ -117,26 +126,27 @@ export default function HomePage() {
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
 
       if (tasksToAdd.length > 0) {
-        setTasks((prevTasks) => {
-          const newTasks: Task[] = tasksToAdd.map((text) => ({
-            id: crypto.randomUUID(),
-            text,
-            completed: false,
-          }));
-          newTasks.forEach(task => {
-            recordTaskEvent({
-              task_id: task.id,
-              task_text: task.text,
-              event_type: "created",
-              timestamp: new Date().toISOString(),
-            }).then(response => {
-              console.log('AI History: Task creation event recorded:', response);
-            }).catch(error => {
-              console.error('AI History: Error recording task creation event:', error);
-            });
+        const newTasks: Task[] = tasksToAdd.map((text) => ({
+          id: crypto.randomUUID(),
+          text,
+          completed: false,
+        }));
+        
+        setTasks((prevTasks) => [...newTasks, ...prevTasks]);
+
+        newTasks.forEach(task => {
+          recordTaskEvent({
+            task_id: task.id,
+            task_text: task.text,
+            event_type: "created",
+            timestamp: new Date().toISOString(),
+          }).then(response => {
+            console.log('AI History: Task creation event recorded:', response);
+          }).catch(error => {
+            console.error('AI History: Error recording task creation event:', error);
           });
-          return [...newTasks, ...prevTasks];
         });
+        
         if (!messageToSet) { 
            messageToSet = tasksToAdd.length === 1 
             ? `Okay, I've added '${tasksToAdd[0]}' to your list. You can get more details or a breakdown using the info button!`
@@ -203,24 +213,20 @@ export default function HomePage() {
         variant: "destructive",
       });
     }
-  }, [toast]); 
+  }, [toast, setTasks]); 
 
   const handleDeleteTask = useCallback((id: string) => {
-    let deletedTaskDescription = "";
     let taskToDelete: Task | undefined;
 
     setTasks((prevTasks) => {
       taskToDelete = prevTasks.find(task => task.id === id);
-      if (taskToDelete) {
-        deletedTaskDescription = taskToDelete.text;
-      }
       return prevTasks.filter((task) => task.id !== id);
     });
 
-    if (deletedTaskDescription && taskToDelete) {
+    if (taskToDelete) {
       toast({
         title: "Task deleted",
-        description: `"${deletedTaskDescription}" has been removed.`,
+        description: `"${taskToDelete.text}" has been removed.`,
       });
       recordTaskEvent({
         task_id: taskToDelete.id,
@@ -240,7 +246,7 @@ export default function HomePage() {
         variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [toast, setTasks]);
 
   const handleUpdateTaskText = useCallback((id: string, newText: string) => {
     let originalTaskText = "";
@@ -270,12 +276,24 @@ export default function HomePage() {
           console.error('AI History: Error recording task text update event:', error);
         });
     } else { 
+        // This case should ideally not happen if a task is found and updated
         toast({
           title: "Task updated!",
-          description: `A task was updated to "${newText}".`,
+          description: `A task's text was updated.`,
+        });
+         recordTaskEvent({
+          task_id: id,
+          task_text: "Unknown original text", 
+          event_type: "text_updated",
+          new_text: newText,
+          timestamp: new Date().toISOString(),
+        }).then(response => {
+          console.log('AI History: Task text update event recorded (original text unknown):', response);
+        }).catch(error => {
+          console.error('AI History: Error recording task text update event (original text unknown):', error);
         });
     }
-  }, [toast]);
+  }, [toast, setTasks]);
 
   const handleGetTaskInsight = useCallback(async (task: Task) => {
     if (!task || !task.id) {
@@ -311,19 +329,20 @@ export default function HomePage() {
           description: "Could not retrieve AI insights for this task. Please try again.",
           variant: "destructive",
         });
-      } // AI service errors or specific "AI could not provide" messages are handled by the flow's return.
+      } 
     } finally {
       setIsLoadingInsight(false);
     }
   }, [tasks, toast]); 
 
   const handleAddSubTasksToList = useCallback((subTaskTexts: string[], parentTaskText: string) => {
+    const newSubTasks: Task[] = subTaskTexts.map(text => ({
+      id: crypto.randomUUID(),
+      text: `Sub-task for "${parentTaskText}": ${text}`,
+      completed: false,
+    }));
+
     setTasks(prevTasks => {
-      const newSubTasks: Task[] = subTaskTexts.map(text => ({
-        id: crypto.randomUUID(),
-        text: `Sub-task for "${parentTaskText}": ${text}`,
-        completed: false,
-      }));
       newSubTasks.forEach(task => {
         recordTaskEvent({
           task_id: task.id,
@@ -344,7 +363,7 @@ export default function HomePage() {
       description: successMessage,
     });
     setAiMessage(successMessage); 
-  }, [toast, setAiMessage]);
+  }, [toast, setAiMessage, setTasks]);
 
 
   return (
@@ -361,7 +380,7 @@ export default function HomePage() {
           onListCreated={handleListCreated}
           isProcessing={isFormProcessing}
           setIsProcessing={setIsFormProcessing}
-          taskCount={tasks.length} // Pass taskCount here
+          taskCount={tasks.length} 
         />
 
         {aiMessage && !isFormProcessing && (

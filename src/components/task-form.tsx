@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { createTasklist, CreateTaskListOutput } from "@/ai/flows/create-task-list";
-import { Sparkles, Loader2 } from "lucide-react"; // Correctly import Sparkles
+import { Sparkles, Loader2 } from "lucide-react"; 
 import { useToast } from "@/hooks/use-toast";
 
 
@@ -29,9 +29,10 @@ interface TaskFormProps {
   onListCreated: (data: CreateTaskListOutput) => void;
   isProcessing: boolean;
   setIsProcessing: (isProcessing: boolean) => void;
+  taskCount: number; // Added taskCount prop
 }
 
-export default function TaskForm({ onListCreated, isProcessing, setIsProcessing }: TaskFormProps) {
+export default function TaskForm({ onListCreated, isProcessing, setIsProcessing, taskCount }: TaskFormProps) {
   const { toast } = useToast();
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -43,7 +44,11 @@ export default function TaskForm({ onListCreated, isProcessing, setIsProcessing 
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setIsProcessing(true);
     try {
-      const result = await createTasklist({ prompt: data.prompt });
+      // Pass the current task count to the AI flow
+      const result = await createTasklist({ 
+        prompt: data.prompt,
+        currentTaskCount: taskCount 
+      });
       onListCreated(result);
       form.reset(); 
     } catch (error) {

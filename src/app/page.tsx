@@ -58,9 +58,7 @@ export default function HomePage() {
   const handleClearList = useCallback(() => {
     const currentTaskCount = tasks.length;
     setTasks([]); 
-    // aiMessage will be set by handleListCreated using AI's reasoning or flow's default
-    // toast will be shown by handleListCreated if appropriate
-    return currentTaskCount > 0; // Return true if tasks were actually cleared
+    return currentTaskCount > 0; 
   }, [tasks]);
 
 
@@ -69,13 +67,11 @@ export default function HomePage() {
     const allTasksAlreadyCompleted = tasks.every(task => task.completed);
     
     if (currentTaskCount === 0 || allTasksAlreadyCompleted) {
-      return false; // Indicate no actual change was made or needed
+      return false; 
     }
 
     setTasks(currentTasks => currentTasks.map(task => ({ ...task, completed: true })));
-    // aiMessage will be set by handleListCreated using AI's reasoning
-    // toast will be shown by handleListCreated
-    return true; // Indicate tasks were marked complete
+    return true; 
   }, [tasks]);
 
 
@@ -107,8 +103,10 @@ export default function HomePage() {
       }
       setAiMessage(messageToSet); 
     } else if (data.action === "query_task_count") {
+      // The AI flow now provides the reasoning with the count
       if (!messageToSet) {
-        messageToSet = "I understand you're asking about your task count. You can see this number displayed at the top of your list.";
+         // Fallback, though AI should ideally provide this.
+        messageToSet = `You currently have ${tasks.length} task(s).`;
       }
       setAiMessage(messageToSet);
       toast({
@@ -125,7 +123,6 @@ export default function HomePage() {
             text,
             completed: false,
           }));
-          // Record creation event for each new task
           newTasks.forEach(task => {
             recordTaskEvent({
               task_id: task.id,
@@ -263,7 +260,7 @@ export default function HomePage() {
         });
         recordTaskEvent({
           task_id: id,
-          task_text: originalTaskText, // Send original text for context, new text is separate
+          task_text: originalTaskText, 
           event_type: "text_updated",
           new_text: newText,
           timestamp: new Date().toISOString(),
@@ -304,16 +301,17 @@ export default function HomePage() {
     } catch (error) {
       console.error("Failed to get task insight:", error);
       setInsightData(null); 
-      // Error toast is handled by provideTaskInsightFlow if it returns an error structure
-      if (error instanceof Error && error.message.includes("AI service")) {
-         // Already handled by the flow
-      } else {
+      const errorMessage = (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') 
+        ? error.message 
+        : 'An unknown error occurred.';
+      
+      if (!errorMessage.toLowerCase().includes("service") && !errorMessage.toLowerCase().includes("ai could not provide")) {
         toast({
           title: "Error fetching insight",
           description: "Could not retrieve AI insights for this task. Please try again.",
           variant: "destructive",
         });
-      }
+      } // AI service errors or specific "AI could not provide" messages are handled by the flow's return.
     } finally {
       setIsLoadingInsight(false);
     }
@@ -326,7 +324,6 @@ export default function HomePage() {
         text: `Sub-task for "${parentTaskText}": ${text}`,
         completed: false,
       }));
-      // Record creation event for each new sub-task
       newSubTasks.forEach(task => {
         recordTaskEvent({
           task_id: task.id,
@@ -353,7 +350,6 @@ export default function HomePage() {
   return (
     <div className="flex flex-col flex-grow">
       <Header onClearList={() => { 
-        // Manually trigger AI-like response for header button
         handleListCreated({ 
           taskList: [], 
           reasoning: tasks.length > 0 ? "Okay, I've cleared all tasks from your list." : "Your list is already empty.", 
@@ -365,6 +361,7 @@ export default function HomePage() {
           onListCreated={handleListCreated}
           isProcessing={isFormProcessing}
           setIsProcessing={setIsFormProcessing}
+          taskCount={tasks.length} // Pass taskCount here
         />
 
         {aiMessage && !isFormProcessing && (

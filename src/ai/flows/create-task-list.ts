@@ -283,6 +283,93 @@ const createTasklistFlow = ai.defineFlow({
       processedAction = 'add_tasks';
     }
 
+    // Process math syllabus/subject requests
+    if (input.prompt.toLowerCase().includes('jee') || input.prompt.toLowerCase().includes('syllabus')) {
+      const subjects = ['Physics', 'Chemistry', 'Mathematics'];
+      const physicsTopics = [
+        'Kinematics and Laws of Motion',
+        'Work, Energy and Power',
+        'Rotational Motion',
+        'Gravitation',
+        'Properties of Solids and Liquids',
+        'Thermodynamics',
+        'Oscillations and Waves',
+        'Electrostatics',
+        'Current Electricity',
+        'Magnetic Effects of Current',
+        'Electromagnetic Induction',
+        'Optics',
+        'Modern Physics'
+      ];
+      
+      const chemistryTopics = [
+        'Basic Concepts in Chemistry',
+        'States of Matter',
+        'Atomic Structure',
+        'Chemical Bonding',
+        'Chemical Thermodynamics',
+        'Solutions',
+        'Equilibrium',
+        'Electrochemistry',
+        'Chemical Kinetics',
+        'Surface Chemistry',
+        'Organic Chemistry Basics',
+        'Hydrocarbons',
+        'Periodic Table and Properties'
+      ];
+      
+      const mathTopics = [
+        'Sets, Relations and Functions',
+        'Complex Numbers',
+        'Matrices and Determinants',
+        'Permutations and Combinations',
+        'Mathematical Induction',
+        'Binomial Theorem',
+        'Calculus: Limits and Continuity',
+        'Differentiation',
+        'Integration',
+        'Differential Equations',
+        'Coordinate Geometry',
+        'Vectors and 3D Geometry',
+        'Statistics and Probability'
+      ];
+      
+      taskList = [
+        ...physicsTopics.map(topic => `Study Physics: ${topic}`),
+        ...chemistryTopics.map(topic => `Study Chemistry: ${topic}`),
+        ...mathTopics.map(topic => `Study Mathematics: ${topic}`)
+      ];
+      
+      reasoning = 'Created comprehensive JEE syllabus study plan';
+      processedAction = 'add_tasks';
+    }
+    
+    // Handle day routine creation with better structure
+    if (input.prompt.toLowerCase().includes('day routine') || 
+        input.prompt.toLowerCase().includes('daily schedule')) {
+      taskList = [
+        '6:00 AM - Wake up and freshen up',
+        '6:30 AM - Morning exercise/yoga',
+        '7:00 AM - Shower and get ready',
+        '7:30 AM - Breakfast and planning',
+        '8:00 AM - Start main study/work session',
+        '10:30 AM - Short break with light snacks',
+        '11:00 AM - Continue study/work',
+        '1:00 PM - Lunch break and rest',
+        '2:00 PM - Resume study/work',
+        '4:00 PM - Evening break/light exercise',
+        '4:30 PM - Final study/work session',
+        '6:30 PM - Free time/hobby activities',
+        '7:30 PM - Dinner',
+        '8:30 PM - Review day\'s work',
+        '9:30 PM - Relaxation/preparation for next day',
+        '10:30 PM - Bedtime routine'
+      ];
+      
+      reasoning = 'Created detailed daily routine schedule';
+      processedAction = 'add_tasks';
+    }
+
     // Check if this is a greeting or conversational input
     const isGreeting = input.prompt.toLowerCase().match(/\b(hi|hey|hello|greetings|how are you)\b/);
     if (isGreeting) {

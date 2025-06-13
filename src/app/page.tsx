@@ -39,7 +39,7 @@ export default function HomePage() {
         if (Array.isArray(parsedTasks)) {
           setTasks(parsedTasks.map(t => ({
             ...t,
-            id: t.id || crypto.randomUUID() 
+            id: t.id || Math.random().toString(36).substring(2, 9) + Date.now().toString(36)
           })));
         }
       }
@@ -159,7 +159,7 @@ export default function HomePage() {
 
       if (tasksToAdd.length > 0) {
         const newTasks: Task[] = tasksToAdd.map((text) => ({
-          id: crypto.randomUUID(),
+          id: Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
           text,
           completed: false,
         }));
@@ -362,7 +362,7 @@ export default function HomePage() {
 
   const handleAddSubTasksToList = useCallback((subTaskTexts: string[], parentTaskText: string) => {
     const newSubTasks: Task[] = subTaskTexts.map(text => ({
-      id: crypto.randomUUID(),
+      id: Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
       text: `Sub-task for "${parentTaskText}": ${text}`,
       completed: false,
     }));

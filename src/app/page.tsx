@@ -71,16 +71,18 @@ export default function HomePage() {
     }
 
     setTasks(currentTasks => currentTasks.map(task => {
-      recordTaskEvent({
-        task_id: task.id,
-        task_text: task.text,
-        event_type: "completed",
-        timestamp: new Date().toISOString(),
-      }).then(response => {
-        console.log('AI History: Task completion (all) event recorded:', response);
-      }).catch(error => {
-        console.error('AI History: Error recording task completion (all) event:', error);
-      });
+      if (!task.completed) { // Only record event if task was not already completed
+        recordTaskEvent({
+          task_id: task.id,
+          task_text: task.text,
+          event_type: "completed",
+          timestamp: new Date().toISOString(),
+        }).then(response => {
+          console.log('AI History: Task completion (all) event recorded:', response);
+        }).catch(error => {
+          console.error('AI History: Error recording task completion (all) event:', error);
+        });
+      }
       return { ...task, completed: true };
     }));
     return true; 
@@ -122,6 +124,12 @@ export default function HomePage() {
       if (data.reasoning && data.reasoning !== "You're asking about your task count. The application will provide this information.") {
         console.log("AI reasoning for task count query (overridden by client):", data.reasoning);
       }
+      toast({
+        title: "AI Assistant",
+        description: messageToDisplay,
+      });
+    } else if (data.action === "no_action_conversational_reply") {
+      messageToDisplay = data.reasoning || "Hello! How can I help you today?";
       toast({
         title: "AI Assistant",
         description: messageToDisplay,
@@ -368,8 +376,6 @@ export default function HomePage() {
   return (
     <div className="flex flex-col flex-grow">
       <Header onClearList={() => { 
-        // Directly call handleListCreated with the clear_all_tasks action
-        // The AI model won't be involved for this direct UI interaction.
         const currentTaskCount = tasks.length;
         handleListCreated({ 
           taskList: [], 

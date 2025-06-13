@@ -64,18 +64,22 @@ The schema includes:
 **Core Logic & Rules (Evaluate in this order of precedence):**
 
 1.  **Command Detection - Clear List (Highest Precedence):**
-    *   If the user's prompt very clearly and directly indicates a desire to delete, clear, or remove all tasks from their list (e.g., "delete all tasks", "clear all my tasks", "remove every task", "empty my list", "clear all task", "clear all the task", "delete all the tasks", "nuke my list"), then:
+    *   If the user's prompt very clearly and directly indicates a desire to delete, clear, or remove all tasks from their list (e.g., "delete all tasks", "clear all my tasks", "remove every task", "empty my list", "clear all task", "clear all the task", "delete all the tasks", "nuke my list", "clear my tasks", "delete my tasks", "wipe tasks"):
         *   Set the 'action' field to "clear_all_tasks".
         *   The 'taskList' field MUST be an empty array (\`[]\`).
         *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to clear all tasks. Your list will be emptied."
     *   **Crucially: Do NOT** create a task named "Delete all tasks", "Clear all tasks", or similar if the intent is to clear the list. This rule overrides all other rules if a clear command is detected.
 
 2.  **Single Conceptual Task Identification (Action: "add_tasks"):**
-    *   If the prompt is NOT a command to clear the list (as per Rule 1), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome"):
+    *   If the prompt is NOT a command to clear the list (as per Rule 1), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
         *   Set the 'action' field to "add_tasks" (or omit it, as "add_tasks" is the default).
-        *   The 'taskList' output should contain **ONLY ONE** string representing that main task.
-        *   Example: User: "buy milk" -> AI \`taskList\` output: \`["Buy milk"]\`, \`action\`: \`"add_tasks"\`
-        *   The 'reasoning' field should be like: "Okay, I've added '[Task Name]' to your list. You can get more details or a breakdown using the info button!"
+        *   The 'taskList' output should contain **ONLY ONE** string. This string should be a concise, actionable rephrasing of the user's request, ideally starting with a verb and properly capitalized.
+        *   Examples:
+            *   User: "buy milk" -> AI \`taskList\` output: \`["Buy milk"]\`
+            *   User: "i want to make chicken" -> AI \`taskList\` output: \`["Make chicken"]\`
+            *   User: "need to get some bread from the store" -> AI \`taskList\` output: \`["Get bread from the store"]\`
+            *   User: "research quantum computing" -> AI \`taskList\` output: \`["Research quantum computing"]\`
+        *   The 'reasoning' field should be like: "Okay, I've added '[Rephrased Task Name]' to your list. You can get more details or a breakdown using the info button!"
     *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns.
     *   Do NOT interpret phrases like "clear my schedule" or "delete old files" as single conceptual tasks if they sound like commands to clear the entire list; those are covered by Rule 1.
 
@@ -94,10 +98,10 @@ The schema includes:
         *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
 
 5.  **Ambiguous Prompts (Default to "add_tasks"):**
-    *   If the prompt is NOT a command to clear the list (as per Rule 1), AND it is ambiguous or unclear for list generation:
+    *   If the prompt is NOT a command to clear the list (as per Rule 1), AND it is ambiguous or unclear for list generation (and doesn't fit rules 2, 3, or 4):
         *   Set the 'action' field to "add_tasks" (or omit it).
-        *   Create a single task based on the user's full prompt.
-        *   The 'reasoning' field should be: "I've created a task based on your input: '[User's Full Prompt]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
+        *   Create a single task based on the user's full prompt, but try to capitalize it.
+        *   The 'reasoning' field should be: "I've created a task based on your input: '[User's Full Prompt capitalized]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
 
 **User Prompt:**
 "{{{prompt}}}"
@@ -122,22 +126,22 @@ const createTasklistFlow = ai.defineFlow(
       
       const taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
       let reasoning = output?.reasoning;
+      const action = output?.action || "add_tasks"; 
+
       if (!reasoning) {
-        if (output?.action === "clear_all_tasks") {
-          reasoning = "Request to clear all tasks has been processed.";
+        if (action === "clear_all_tasks") {
+          reasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
         } else if (taskList.length > 0) {
-          reasoning = `Successfully added ${taskList.length} task(s).`;
+           if (taskList.length === 1 && action === "add_tasks") {
+            reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
+          } else {
+            reasoning = `Alright, I've drafted a plan with ${taskList.length} task(s) for you!`;
+          }
         } else {
           // If no tasks were added and no specific action, it might be an empty or unhandled prompt by AI.
-          // Or, it could be a clear_all_tasks action where AI didn't provide reasoning.
-          if (output?.action !== "clear_all_tasks") {
-             reasoning = "AI processed your request, but no specific tasks were generated or action taken. You can try rephrasing your request.";
-          } else {
-             reasoning = "All tasks have been cleared as per your request."; // Default for clear if AI omits reasoning
-          }
+          reasoning = "AI processed your request, but no specific tasks were generated or action taken. You can try rephrasing your request.";
         }
       }
-      const action = output?.action || "add_tasks"; 
 
       // Ensure taskList is empty if action is clear_all_tasks, even if AI messed up.
       if (action === "clear_all_tasks" && taskList.length > 0) {

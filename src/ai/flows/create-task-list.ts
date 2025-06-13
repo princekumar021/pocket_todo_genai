@@ -161,19 +161,17 @@ const createTasklistFlow = ai.defineFlow(
 
       // Post-processing to enforce single task for Rule 8 if AI misbehaves
       if (action === "add_tasks" && taskList.length > 1) {
-        // Heuristic: if all tasks are identical and match the prompt, it's likely a Rule 8 misfire.
-        // Or if the AI failed to identify it as a "single conceptual task" (Rule 5) and split it.
-        const promptLower = input.prompt.toLowerCase();
-        const allTasksMatchPrompt = taskList.every(task => task.toLowerCase() === promptLower);
+        const promptLowerTrimmed = input.prompt.trim().toLowerCase();
+        // Check if all tasks, when trimmed and lowercased, match the trimmed and lowercased prompt
+        const allTasksMatchPrompt = taskList.every(task => task.trim().toLowerCase() === promptLowerTrimmed);
         
         if (allTasksMatchPrompt && taskList.length > 0) {
-           // This indicates a likely Rule 8 misfire where the AI created multiple identical tasks from the prompt.
-           console.warn(`AI returned multiple identical tasks for an ambiguous-like prompt. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
-           taskList = [taskList[0]]; // Keep only the first instance
+           console.warn(`AI returned multiple identical tasks matching the prompt. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
+           // Ensure the single task is also trimmed and uses the first (potentially capitalized) version
+           taskList = [taskList[0].trim()]; 
         } else {
-            // More general check: if all tasks are identical (even if not matching the prompt directly),
+            // More general check: if all tasks in the list are identical to each other (even if not matching the prompt directly),
             // and the prompt was short/simple, it might be a misapplication of Rule 5 or 6.
-            // For simplicity, if unique tasks = 1, and prompt is not clearly asking for multiple items, reduce.
             const uniqueTasks = Array.from(new Set(taskList.map(t => t.trim())));
             if (uniqueTasks.length === 1 && taskList.length > 1) {
                 // A simple heuristic: if the prompt doesn't contain obvious list indicators like "and", ",", "plan", "list of"
@@ -181,7 +179,7 @@ const createTasklistFlow = ai.defineFlow(
                 const seemsLikeSingleRequest = !/(\band\b|,|plan|list of)/i.test(input.prompt);
                 if (seemsLikeSingleRequest) {
                     console.warn(`AI returned multiple identical tasks for a prompt that seems to be a single request. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
-                    taskList = [uniqueTasks[0]];
+                    taskList = [uniqueTasks[0]]; // uniqueTasks are already trimmed
                 }
             }
         }
@@ -200,20 +198,33 @@ const createTasklistFlow = ai.defineFlow(
         } else if (taskList.length > 0 && action === "add_tasks") {
            if (taskList.length === 1) {
              // Check if this was likely a Rule 8 (ambiguous) or Rule 5 (single conceptual)
-             const capitalizedPrompt = input.prompt.charAt(0).toUpperCase() + input.prompt.slice(1).toLowerCase();
-             const taskTextLower = taskList[0].toLowerCase();
-             const inputPromptLower = input.prompt.toLowerCase();
+             // For Rule 8, AI should provide reasoning. If it doesn't, we construct it.
+             // For Rule 5, AI should also provide reasoning.
+             // This default reasoning is a fallback.
+             const singleTaskText = taskList[0];
+             const inputPromptTrimmedLower = input.prompt.trim().toLowerCase();
+             const taskTextTrimmedLower = singleTaskText.trim().toLowerCase();
+             // Attempt to create a "properly capitalized" version from the input prompt for comparison for Rule 8.
+             // This is a simple capitalization, more complex proper capitalization is hard.
+             let capitalizedInputPrompt = input.prompt.trim();
+             if (capitalizedInputPrompt.length > 0) {
+                capitalizedInputPrompt = capitalizedInputPrompt.charAt(0).toUpperCase() + capitalizedInputPrompt.slice(1);
+             }
 
-             if (taskTextLower === inputPromptLower || taskList[0] === capitalizedPrompt ) { // Likely Rule 8
-                reasoning = `I've created a task based on your input: '${taskList[0]}'. If this wasn't what you meant, try rephrasing or use the info button for more options.`;
+
+             if (taskTextTrimmedLower === inputPromptTrimmedLower || singleTaskText.trim() === capitalizedInputPrompt) { // Likely Rule 8 scenario or AI capitalized the prompt as the task
+                reasoning = `I've created a task based on your input: '${singleTaskText.trim()}'. If this wasn't what you meant, try rephrasing or use the info button for more options.`;
              } else { // Likely Rule 5 (single conceptual task)
-                reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
+                reasoning = `Okay, I've added '${singleTaskText.trim()}' to your list. You can get more details or a breakdown using the info button!`;
              }
           } else { // Rule 6 or 7 (multiple distinct or random)
             reasoning = `Alright, I've drafted a plan with ${taskList.length} task(s) for you!`;
           }
         } else if (taskList.length === 0 && action === "add_tasks") {
-           const capitalizedPrompt = input.prompt.charAt(0).toUpperCase() + input.prompt.slice(1);
+           let capitalizedPrompt = input.prompt.trim();
+           if (capitalizedPrompt.length > 0) {
+              capitalizedPrompt = capitalizedPrompt.charAt(0).toUpperCase() + capitalizedPrompt.slice(1);
+           }
            reasoning = `I've processed your request: '${capitalizedPrompt}'. No specific tasks were generated. If you intended to create tasks, try rephrasing.`;
         } else {
           reasoning = "AI processed your request.";
@@ -223,10 +234,11 @@ const createTasklistFlow = ai.defineFlow(
         }
       }
 
+      // Final check: if action is not add_tasks, taskList should be empty.
       if ((action === "clear_all_tasks" || action === "complete_all_tasks" || action === "query_task_count" || action === "no_action_conversational_reply") && taskList.length > 0) {
-        console.warn(`AI returned action:${action} but non-empty taskList. Overriding taskList to empty.`);
-        let finalReasoning = reasoning;
-        if (!output?.reasoning) { 
+        console.warn(`AI returned action:'${action}' but non-empty taskList. Overriding taskList to empty. Original reasoning: "${output?.reasoning}", TaskList: ${JSON.stringify(output?.taskList)}`);
+        let finalReasoning = reasoning; // Use already processed/defaulted reasoning
+        if (!output?.reasoning) { // If AI didn't give reasoning, use our specific defaults for these actions
             if (action === "clear_all_tasks") finalReasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
             else if (action === "complete_all_tasks") finalReasoning = "Okay, I've processed your request to mark all tasks as completed.";
             else if (action === "query_task_count") finalReasoning = "You're asking about your task count. The application will provide this information.";
@@ -254,9 +266,11 @@ const createTasklistFlow = ai.defineFlow(
       return {
         taskList: [],
         reasoning: userFriendlyMessage,
-        action: "add_tasks" 
+        action: "add_tasks" // Default to add_tasks on error to avoid breaking UI expecting taskList
       };
     }
   }
 );
 
+
+    

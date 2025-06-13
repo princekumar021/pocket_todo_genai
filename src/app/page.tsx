@@ -17,9 +17,6 @@ const LOCAL_STORAGE_KEY = "pocketTasksAI_tasks";
 
 export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>(() => {
-    // Initialize state from localStorage synchronously on client, if available
-    // This avoids a flicker if localStorage is populated.
-    // Ensure this only runs on the client.
     if (typeof window !== "undefined") {
       const storedTasks = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (storedTasks) {
@@ -28,7 +25,7 @@ export default function HomePage() {
           if (Array.isArray(parsedTasks)) {
             return parsedTasks.map(t => ({
               ...t,
-              id: t.id || crypto.randomUUID()
+              id: t.id || crypto.randomUUID() 
             }));
           }
         } catch (error) {
@@ -37,7 +34,7 @@ export default function HomePage() {
         }
       }
     }
-    return []; // Default to empty array if no localStorage or on server
+    return [];
   });
 
   const [aiMessage, setAiMessage] = useState<string | null>(null);
@@ -48,14 +45,19 @@ export default function HomePage() {
   const [isLoadingInsight, setIsLoadingInsight] = useState<boolean>(false);
   const [isInsightDialogOpen, setIsInsightDialogOpen] = useState<boolean>(false);
 
+  const [isClientMounted, setIsClientMounted] = useState(false);
+
   const { toast } = useToast();
 
-  // Effect to persist tasks to localStorage whenever they change
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    setIsClientMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && isClientMounted) { // Ensure client mounted before writing
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(tasks));
     }
-  }, [tasks]);
+  }, [tasks, isClientMounted]);
 
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
     const newTasks: Task[] = data.taskList.map((text) => ({
@@ -70,7 +72,6 @@ export default function HomePage() {
       title: "Task list created!",
       description: message,
     });
-    // isFormProcessing is handled by TaskForm
   }, [toast]);
 
   const handleToggleComplete = useCallback((id: string) => {
@@ -145,7 +146,6 @@ export default function HomePage() {
           description: `"${originalTaskText}" changed to "${newText}".`,
         });
     } else {
-        // This case should ideally not happen if id is always valid.
         toast({
           title: "Task updated!",
           description: `A task was updated to "${newText}".`,
@@ -175,7 +175,7 @@ export default function HomePage() {
       setInsightData(insight);
     } catch (error) {
       console.error("Failed to get task insight:", error);
-      setInsightData(null); // Clear any previous insight data on error
+      setInsightData(null);
       toast({
         title: "Error fetching insight",
         description: "Could not retrieve AI insights for this task. Please try again.",
@@ -184,7 +184,7 @@ export default function HomePage() {
     } finally {
       setIsLoadingInsight(false);
     }
-  }, [tasks, toast]); // Added tasks to dependency array for taskList context
+  }, [tasks, toast]); 
 
   const handleAddSubTasksToList = useCallback((subTaskTexts: string[], parentTaskText: string) => {
     const newSubTasks: Task[] = subTaskTexts.map(text => ({
@@ -208,23 +208,22 @@ export default function HomePage() {
           title: "List is already empty",
           description: "There are no tasks to remove.",
         });
-        return currentTasks; // No change
+        return currentTasks; 
       }
       
-      // If list is not empty, clear it
       setAiMessage("All tasks have been cleared from your list.");
       toast({
         title: "List Cleared",
         description: "All tasks have been removed.",
       });
-      return []; // Return new empty array
+      return []; 
     });
   }, [toast]);
 
 
   return (
     <div className="flex flex-col flex-grow">
-      <Header onClearList={handleClearList} taskCount={tasks.length} />
+      <Header onClearList={handleClearList} taskCount={isClientMounted ? tasks.length : 0} />
       <main className="container mx-auto px-4 py-6 flex-grow flex flex-col gap-6">
         <TaskForm
           onListCreated={handleListCreated}
@@ -264,4 +263,3 @@ export default function HomePage() {
     </div>
   );
 }
- 

@@ -12,17 +12,32 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+/**
+ * Defines the input schema for the task creation flow.
+ * @property {string} prompt - A user's natural language request for tasks.
+ */
 const CreateTaskListInputSchema = z.object({
   prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list.'),
 });
 export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
 
+/**
+ * Defines the output schema for the task creation flow.
+ * @property {string[]} taskList - The generated list of tasks.
+ * @property {string} [reasoning] - A friendly message to the user explaining the result or any issues.
+ */
 const CreateTaskListOutputSchema = z.object({
-  taskList: z.array(z.string()).describe('A structured to-do list generated from the user prompt. If the user\'s prompt describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake"), this list should contain ONLY ONE string for that main task. If the prompt asks for multiple distinct tasks (e.g., "plan my weekend"), then this list will contain those multiple tasks.'),
-  reasoning: z.string().optional().describe('A brief, friendly message for the user, summarizing what was done or confirming success. e.g., "Okay, I\'ve added \'Get ingredients for cake\' to your list. You can get more details using the info button!" or "Here are some tasks based on your request."'),
+  taskList: z.array(z.string()).describe('An array of task strings. Contains a single task for a high-level goal, multiple tasks if the user requested a breakdown, or placeholder tasks if a random generation was requested.'),
+  reasoning: z.string().optional().describe('A brief, friendly message for the user, summarizing what was done or explaining any issues encountered.'),
 });
 export type CreateTaskListOutput = z.infer<typeof CreateTaskListOutputSchema>;
 
+/**
+ * A wrapper function that executes the Genkit flow to create a task list.
+ * This provides a clean, standard async function interface for consumers.
+ * @param {CreateTaskListInput} input - The user's prompt.
+ * @returns {Promise<CreateTaskListOutput>} A promise that resolves to the structured task list.
+ */
 export async function createTasklist(input: CreateTaskListInput): Promise<CreateTaskListOutput> {
   return createTasklistFlow(input);
 }
@@ -31,28 +46,43 @@ const prompt = ai.definePrompt({
   name: 'createTaskListPrompt',
   input: {schema: CreateTaskListInputSchema},
   output: {schema: CreateTaskListOutputSchema},
-  prompt: `You are a personal assistant. Your goal is to interpret the user's prompt and decide if it's a request for a single, overarching task or a request for a list of multiple distinct tasks.
+  prompt: `
+You are an expert personal assistant that converts user requests into structured to-do lists.
 
-User Prompt: {{{prompt}}}
+Your main goal is to determine the user's intent based on their prompt.
 
-1.  **Single Task Identification:**
+**Core Logic & Rules:**
+
+1.  **Single Conceptual Task Identification:**
     *   If the user's prompt describes a single conceptual task, even if it implies multiple steps or items (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome"), the 'taskList' output should contain **ONLY ONE** string representing that main task. For example:
         *   User: "buy milk" -> AI \`taskList\` output: \`["Buy milk"]\`
         *   User: "get ingredients for a cake" -> AI \`taskList\` output: \`["Get ingredients for a cake"]\` (The actual ingredients will be detailed if the user requests insights for this task later).
         *   User: "write a blog post about AI" -> AI \`taskList\` output: \`["Write a blog post about AI"]\`
-    *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns.
+    *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns (like ingredients or sub-steps).
 
-2.  **Multiple Distinct Tasks Identification:**
-    *   If the user's prompt clearly asks for multiple, separate, and distinct tasks (e.g., "plan my weekend: movies and dinner", "tasks for today: email boss, finish report, call mom", "my work items for the week"), then the 'taskList' output should be an array of these distinct tasks. For example:
-        *   User: "plan my week" -> AI \`taskList\` output: \`["Review weekly goals", "Schedule key meetings", "Allocate time for deep work"]\`
-        *   User: "things to do today and tomorrow" -> AI \`taskList\` output: \`["Task A for today", "Task B for today", "Task C for tomorrow"]\`
+2.  **Multiple Distinct Tasks Intent:**
+    *   If the user's prompt explicitly asks for a plan involving several separate items, or lists multiple distinct actions, break it down into a 'taskList' with multiple strings.
+    *   **Examples:**
+        *   User: "plan my week" -> \`["Review weekly goals", "Schedule key meetings", "Allocate time for deep work"]\`
+        *   User: "morning routine" -> \`["Wake up and stretch", "Meditate for 10 minutes", "Prepare breakfast"]\`
+        *   User: "get ready for the party" -> \`["Buy a gift", "Pick up dry cleaning", "Confirm RSVP"]\`
 
-Provide a brief, friendly message for the user in the 'reasoning' field. This message should summarize what you did or confirm success.
-*   If a single task was created, the reasoning could be: "Okay, I've added '[Task Name]' to your list. You can get more details or a breakdown using the info button!"
-*   If multiple tasks were created: "Alright, I've drafted a plan with a few tasks for you!"
-*   If the prompt was very short like "work": "Here's a general task based on your prompt. Feel free to ask for more details!"
+3.  **Random/Generic Task Generation:**
+    *   If the user asks for a specific number of random, generic, or example tasks (e.g., "give me 10 random tasks", "generate 5 sample tasks", "create 3 tasks for today"), your 'taskList' output MUST contain that many placeholder tasks, like "Random Task 1", "Random Task 2", etc.
+    *   **Example:**
+        *   User: "give me 3 random tasks" -> AI \`taskList\` output: \`["Random Task 1", "Random Task 2", "Random Task 3"]\`
 
-Ensure your 'taskList' output is always an array of strings, adhering to the logic above.
+**Reasoning Field Guidance:**
+*   Always provide a brief, friendly, and informative message in the 'reasoning' field.
+*   For a single task created: "Okay, I've added '[Task Name]' to your list. You can get more details or a breakdown using the info button!"
+*   For multiple tasks created (explicitly requested or random generation): "Alright, I've drafted a plan with [Number] tasks for you!"
+*   If the prompt is ambiguous or unclear for list generation: "I've created a task based on your input: '[User's Full Prompt]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
+
+**User Prompt:**
+"{{{prompt}}}"
+
+**Instructions:**
+Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format. Ensure 'taskList' is always an array of strings.
 `,
 });
 
@@ -63,11 +93,20 @@ const createTasklistFlow = ai.defineFlow(
     outputSchema: CreateTaskListOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
-    // Ensure taskList is always an array, even if AI fails to produce it or returns null/undefined
-    const taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
-    const reasoning = output?.reasoning || "I've generated some tasks for you!";
-    return { taskList, reasoning };
+    try {
+      const {output} = await prompt(input);
+      
+      const taskList = Array.isArray(output?.taskList) ? output.taskList : [];
+      const reasoning = output?.reasoning || "Here are the tasks I generated for you.";
+      
+      return { taskList, reasoning };
+    } catch (error) {
+      console.error("Error calling AI model in createTasklistFlow:", error);
+      // Return a structured error response that the frontend can handle
+      return {
+        taskList: [],
+        reasoning: "I'm having trouble connecting to the AI service right now. Please try again in a few moments."
+      };
+    }
   }
 );
-

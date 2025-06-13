@@ -70,59 +70,63 @@ export default function HomePage() {
       return false; 
     }
 
-    setTasks(currentTasks => currentTasks.map(task => ({ ...task, completed: true })));
+    setTasks(currentTasks => currentTasks.map(task => {
+      recordTaskEvent({
+        task_id: task.id,
+        task_text: task.text,
+        event_type: "completed",
+        timestamp: new Date().toISOString(),
+      }).then(response => {
+        console.log('AI History: Task completion (all) event recorded:', response);
+      }).catch(error => {
+        console.error('AI History: Error recording task completion (all) event:', error);
+      });
+      return { ...task, completed: true };
+    }));
     return true; 
   }, [tasks]);
 
 
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
-    let messageToSet = data.reasoning; 
+    let messageToDisplay = data.reasoning; 
 
     if (data.action === "clear_all_tasks") {
-      if (!messageToSet) { 
-        messageToSet = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
-      }
       const tasksWereCleared = handleClearList(); 
       if (tasksWereCleared) {
+        messageToDisplay = data.reasoning || "Okay, I've processed your request to clear all tasks. Your list has been emptied.";
         toast({ title: "List Cleared", description: "All tasks have been removed." });
       } else {
+        messageToDisplay = data.reasoning || "Your list is already empty. No tasks to remove.";
         toast({ title: "List is already empty", description: "There are no tasks to remove." });
       }
-      setAiMessage(messageToSet); 
     } else if (data.action === "complete_all_tasks") {
-      if (!messageToSet) { 
-        messageToSet = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated.";
-      }
       const tasksWereUpdated = handleCompleteAllTasks();
       if (tasksWereUpdated) {
+        messageToDisplay = data.reasoning || "Okay, I've processed your request to mark all tasks as completed.";
         toast({ title: "All Tasks Completed!", description: "Great job, everything is marked as done!" });
       } else if (tasks.length === 0) {
+        messageToDisplay = data.reasoning || "Your list is empty, so there are no tasks to complete.";
         toast({ title: "No tasks to complete", description: "Your list is empty." });
       } else {
+        messageToDisplay = data.reasoning || "All your tasks were already completed.";
          toast({ title: "All tasks already completed", description: "There are no pending tasks to mark as complete." });
       }
-      setAiMessage(messageToSet); 
     } else if (data.action === "query_task_count") {
-      // Construct message locally for real-time accuracy
       const currentTaskCount = tasks.length;
       if (currentTaskCount > 0) {
-        messageToSet = `You currently have ${currentTaskCount} task${currentTaskCount === 1 ? '' : 's'}.`;
+        messageToDisplay = `You currently have ${currentTaskCount} task${currentTaskCount === 1 ? '' : 's'}.`;
       } else {
-        messageToSet = "You currently have no tasks.";
+        messageToDisplay = "You currently have no tasks.";
       }
-      
+      // Log AI's original reasoning if different, for debugging, but don't use it for user display.
       if (data.reasoning && data.reasoning !== "You're asking about your task count. The application will provide this information.") {
-        // If AI provides more specific reasoning (e.g. an error message), append it or prioritize it.
-        // For now, we'll stick to the client-generated message for accuracy.
-        console.log("AI reasoning for task count query:", data.reasoning);
+        console.log("AI reasoning for task count query (overridden by client):", data.reasoning);
       }
-
-      setAiMessage(messageToSet);
       toast({
         title: "AI Assistant",
-        description: messageToSet,
+        description: messageToDisplay,
       });
-    } else { // Default to "add_tasks"
+    } else { // Default to "add_tasks" or other unhandled actions
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
 
       if (tasksToAdd.length > 0) {
@@ -147,30 +151,24 @@ export default function HomePage() {
           });
         });
         
-        if (!messageToSet) { 
-           messageToSet = tasksToAdd.length === 1 
-            ? `Okay, I've added '${tasksToAdd[0]}' to your list. You can get more details or a breakdown using the info button!`
-            : `Alright, I've drafted a plan with ${tasksToAdd.length} task(s) for you!`;
-        }
+        messageToDisplay = data.reasoning || (tasksToAdd.length === 1 
+          ? `Okay, I've added '${tasksToAdd[0]}' to your list. You can get more details or a breakdown using the info button!`
+          : `Alright, I've drafted a plan with ${tasksToAdd.length} task(s) for you!`);
+        
         toast({
           title: "Tasks Added!",
-          description: messageToSet,
+          description: messageToDisplay,
         });
-      } else if (!messageToSet) {
-        messageToSet = "AI processed your request, but no new tasks were added.";
+      } else { // No tasks added, but AI might have reasoning (e.g., an error from AI, or a non-task-adding action)
+        messageToDisplay = data.reasoning || "AI processed your request, but no new tasks were added.";
         toast({
           title: "AI Assistant",
-          description: messageToSet,
-        });
-      } else {
-         toast({ 
-          title: "AI Assistant",
-          description: messageToSet,
+          description: messageToDisplay,
         });
       }
-      setAiMessage(messageToSet);
     }
-  }, [toast, handleClearList, handleCompleteAllTasks, setAiMessage, tasks]);
+    setAiMessage(messageToDisplay);
+  }, [toast, handleClearList, handleCompleteAllTasks, tasks, setTasks, setAiMessage]);
 
 
   const handleToggleComplete = useCallback((id: string) => {
@@ -276,7 +274,6 @@ export default function HomePage() {
           console.error('AI History: Error recording task text update event:', error);
         });
     } else { 
-        // This case should ideally not happen if a task is found and updated
         toast({
           title: "Task updated!",
           description: `A task's text was updated.`,
@@ -343,7 +340,8 @@ export default function HomePage() {
     }));
 
     setTasks(prevTasks => {
-      newSubTasks.forEach(task => {
+      const updatedTasks = [...newSubTasks, ...prevTasks];
+      newSubTasks.forEach(task => { // Log only the newly added sub-tasks
         recordTaskEvent({
           task_id: task.id,
           task_text: task.text,
@@ -355,8 +353,9 @@ export default function HomePage() {
           console.error('AI History: Error recording sub-task creation event:', error);
         });
       });
-      return [...newSubTasks, ...prevTasks];
+      return updatedTasks;
     });
+
     const successMessage = `${subTaskTexts.length} sub-task(s) related to "${parentTaskText}" added to your list.`;
     toast({
       title: "Sub-tasks added!",
@@ -369,9 +368,12 @@ export default function HomePage() {
   return (
     <div className="flex flex-col flex-grow">
       <Header onClearList={() => { 
+        // Directly call handleListCreated with the clear_all_tasks action
+        // The AI model won't be involved for this direct UI interaction.
+        const currentTaskCount = tasks.length;
         handleListCreated({ 
           taskList: [], 
-          reasoning: tasks.length > 0 ? "Okay, I've cleared all tasks from your list." : "Your list is already empty.", 
+          reasoning: currentTaskCount > 0 ? "Okay, I've cleared all tasks from your list." : "Your list is already empty.", 
           action: "clear_all_tasks" 
         });
       }} taskCount={isMounted ? tasks.length : 0} />

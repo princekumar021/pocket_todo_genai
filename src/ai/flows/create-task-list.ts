@@ -88,12 +88,13 @@ The schema includes:
         *   The 'reasoning' field should be a short, polite, and friendly acknowledgment. Examples: "Hello! How can I help you with your tasks today?", "I'm doing well, thanks! Ready to tackle some tasks?", "Hi there! What can I do for you regarding your to-do list?"
     *   Do NOT create a task from these greetings.
 
-4.  **Query - Task Count (Informational):**
-    *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have", "how many tsk i have?"):
+4.  **Query - Task Count (Informational - Strict Matching):**
+    *   If the user's prompt is a question *specifically* asking for the number or quantity of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have", "how many tsk i have?", "count my tasks"):
         *   The 'action' field in your JSON output MUST BE "query_task_count". This is MANDATORY for this rule.
         *   The 'taskList' field MUST be an empty array (\`[]\`).
         *   The 'reasoning' field MUST be exactly the string: "You're asking about your task count. The application will provide this information." The application uses this specific string internally when the action is "query_task_count", but will display a different message to the user with the actual count. Your role is to provide this exact string for reasoning if this rule is matched.
     *   Do NOT create a task like "How many tasks do I have". This is an informational query. Ensure 'action' is "query_task_count". This rule is very important for the application to function correctly.
+    *   Queries like "what is my first task" or "details about task X" do NOT fall under this rule.
 
 5.  **Single Conceptual Task Identification (Action: "add_tasks"):**
     *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
@@ -110,7 +111,7 @@ The schema includes:
 6.  **Multiple Distinct Tasks Intent (Action: "add_tasks"):**
     *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it explicitly asks for a plan involving several separate items, or lists multiple distinct actions:
         *   Set the 'action' field to "add_tasks" (or omit it).
-        *   Break it down into a 'taskList' with multiple strings.
+        *   Break it down into a 'taskList' with multiple strings. Each string should be a distinct task.
         *   Example: User: "plan my week" -> \`taskList\`: \`["Review weekly goals", "Schedule key meetings", "Allocate time for deep work"]\`, \`action\`: \`"add_tasks"\`
         *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
 
@@ -121,11 +122,12 @@ The schema includes:
         *   Example: User: "give me 3 random tasks" -> AI \`taskList\`: \`["Random Task 1", "Random Task 2", "Random Task 3"]\`, \`action\`: \`"add_tasks"\`
         *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
 
-8.  **Ambiguous Prompts (Default to "add_tasks"):**
+8.  **Ambiguous Prompts (Default to "add_tasks" - Single Task):**
     *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it is ambiguous or unclear for list generation (and doesn't fit rules 5, 6, or 7):
         *   Set the 'action' field to "add_tasks" (or omit it).
-        *   Create a single task based on the user's full prompt, but try to capitalize it.
+        *   The 'taskList' MUST contain **EXACTLY ONE** string. This string should be the user's full prompt, but try to capitalize it properly (e.g., "whats is in my first task" becomes "Whats is in my first task").
         *   The 'reasoning' field should be: "I've created a task based on your input: '[User's Full Prompt capitalized]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
+    *   **Do NOT** generate multiple identical tasks from such an input. The taskList must contain only one item. For example, if user says "what is my first task", the taskList should be \`["What is my first task"]\`.
 
 **User Input:**
 Prompt: "{{{prompt}}}"
@@ -138,6 +140,7 @@ Set the 'action' field appropriately based on the rules above. If no specific co
 Prioritize Rules 1, 2, 3 and 4 for command/greeting/query detection.
 For Rule 4 (Task Count Query), it is CRITICAL that the 'action' field is set to "query_task_count" and the 'reasoning' field is exactly "You're asking about your task count. The application will provide this information.".
 For Rule 3 (Greeting), it is CRITICAL that 'action' is "no_action_conversational_reply".
+For Rule 8 (Ambiguous Prompts), it is CRITICAL that 'taskList' contains only ONE item.
 These prioritizations are essential for correct application behavior.
 `,
 });
@@ -152,9 +155,38 @@ const createTasklistFlow = ai.defineFlow(
     try {
       const {output} = await prompt(input);
 
-      const taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
+      let taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
       let reasoning = output?.reasoning;
       const action = output?.action || "add_tasks";
+
+      // Post-processing to enforce single task for Rule 8 if AI misbehaves
+      if (action === "add_tasks" && taskList.length > 1) {
+        // Heuristic: if all tasks are identical and match the prompt, it's likely a Rule 8 misfire.
+        // Or if the AI failed to identify it as a "single conceptual task" (Rule 5) and split it.
+        const promptLower = input.prompt.toLowerCase();
+        const allTasksMatchPrompt = taskList.every(task => task.toLowerCase() === promptLower);
+        
+        if (allTasksMatchPrompt && taskList.length > 0) {
+           // This indicates a likely Rule 8 misfire where the AI created multiple identical tasks from the prompt.
+           console.warn(`AI returned multiple identical tasks for an ambiguous-like prompt. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
+           taskList = [taskList[0]]; // Keep only the first instance
+        } else {
+            // More general check: if all tasks are identical (even if not matching the prompt directly),
+            // and the prompt was short/simple, it might be a misapplication of Rule 5 or 6.
+            // For simplicity, if unique tasks = 1, and prompt is not clearly asking for multiple items, reduce.
+            const uniqueTasks = Array.from(new Set(taskList.map(t => t.trim())));
+            if (uniqueTasks.length === 1 && taskList.length > 1) {
+                // A simple heuristic: if the prompt doesn't contain obvious list indicators like "and", ",", "plan", "list of"
+                // and the AI produced multiple identical tasks, it's likely an error.
+                const seemsLikeSingleRequest = !/(\band\b|,|plan|list of)/i.test(input.prompt);
+                if (seemsLikeSingleRequest) {
+                    console.warn(`AI returned multiple identical tasks for a prompt that seems to be a single request. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
+                    taskList = [uniqueTasks[0]];
+                }
+            }
+        }
+      }
+
 
       if (!reasoning) {
         if (action === "clear_all_tasks") {
@@ -165,21 +197,42 @@ const createTasklistFlow = ai.defineFlow(
           reasoning = "You're asking about your task count. The application will provide this information.";
         } else if (action === "no_action_conversational_reply") {
           reasoning = "Hello! How can I help you with your tasks today?";
-        } else if (taskList.length > 0) {
-           if (taskList.length === 1 && action === "add_tasks") {
-            reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
-          } else {
+        } else if (taskList.length > 0 && action === "add_tasks") {
+           if (taskList.length === 1) {
+             // Check if this was likely a Rule 8 (ambiguous) or Rule 5 (single conceptual)
+             const capitalizedPrompt = input.prompt.charAt(0).toUpperCase() + input.prompt.slice(1).toLowerCase();
+             const taskTextLower = taskList[0].toLowerCase();
+             const inputPromptLower = input.prompt.toLowerCase();
+
+             if (taskTextLower === inputPromptLower || taskList[0] === capitalizedPrompt ) { // Likely Rule 8
+                reasoning = `I've created a task based on your input: '${taskList[0]}'. If this wasn't what you meant, try rephrasing or use the info button for more options.`;
+             } else { // Likely Rule 5 (single conceptual task)
+                reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
+             }
+          } else { // Rule 6 or 7 (multiple distinct or random)
             reasoning = `Alright, I've drafted a plan with ${taskList.length} task(s) for you!`;
           }
+        } else if (taskList.length === 0 && action === "add_tasks") {
+           const capitalizedPrompt = input.prompt.charAt(0).toUpperCase() + input.prompt.slice(1);
+           reasoning = `I've processed your request: '${capitalizedPrompt}'. No specific tasks were generated. If you intended to create tasks, try rephrasing.`;
         } else {
-          reasoning = "AI processed your request, but no specific tasks were generated or action taken. You can try rephrasing your request.";
+          reasoning = "AI processed your request.";
+          if (taskList.length > 0) reasoning += ` ${taskList.length} task(s) were affected.`;
+          else if (action !== "add_tasks") reasoning += ` The action was '${action}'.`;
+          else reasoning += " No tasks were generated or specific action taken. You can try rephrasing your request."
         }
       }
 
-      // Ensure that if an action implies no tasks, the taskList is empty.
       if ((action === "clear_all_tasks" || action === "complete_all_tasks" || action === "query_task_count" || action === "no_action_conversational_reply") && taskList.length > 0) {
         console.warn(`AI returned action:${action} but non-empty taskList. Overriding taskList to empty.`);
-        return { taskList: [], reasoning, action };
+        let finalReasoning = reasoning;
+        if (!output?.reasoning) { 
+            if (action === "clear_all_tasks") finalReasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
+            else if (action === "complete_all_tasks") finalReasoning = "Okay, I've processed your request to mark all tasks as completed.";
+            else if (action === "query_task_count") finalReasoning = "You're asking about your task count. The application will provide this information.";
+            else if (action === "no_action_conversational_reply") finalReasoning = "Hello! How can I help you today?";
+        }
+        return { taskList: [], reasoning: finalReasoning, action };
       }
 
       return { taskList, reasoning, action };
@@ -190,16 +243,18 @@ const createTasklistFlow = ai.defineFlow(
         : 'An unknown error occurred with the AI service.';
 
       let userFriendlyMessage = "I'm having trouble connecting to the AI service right now. Please try again in a few moments.";
-      if (errorMessage.includes('503') || errorMessage.toLowerCase().includes('overloaded')) {
-        userFriendlyMessage = "The AI service is currently overloaded. Please try again in a little while.";
+      if (errorMessage.includes('503') || errorMessage.toLowerCase().includes('overloaded') || errorMessage.toLowerCase().includes('unavailable')) {
+        userFriendlyMessage = "The AI service is currently overloaded or unavailable. Please try again in a little while.";
       } else if (errorMessage.toLowerCase().includes('api key')) {
         userFriendlyMessage = "There seems to be an issue with the AI service configuration. Please contact support.";
+      } else if (errorMessage.toLowerCase().includes('malformed') || errorMessage.toLowerCase().includes('parse')) {
+        userFriendlyMessage = "The AI returned an unexpected response. I'll try to handle it, but you might want to rephrase your request.";
       }
       
       return {
         taskList: [],
         reasoning: userFriendlyMessage,
-        action: "add_tasks" // Default to add_tasks on error to prevent unexpected clear/complete actions
+        action: "add_tasks" 
       };
     }
   }

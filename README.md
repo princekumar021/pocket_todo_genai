@@ -26,3 +26,4 @@ The following environment variables are required:
 - `GEMINI_API_KEY`: Your Google Gemini API key for AI functionality
 
 Never commit `.env.local` or any other files containing actual API keys to version control.
+# pocket_todo_genai

@@ -115,14 +115,33 @@ export default function HomePage() {
       }
     } else if (data.action === "query_task_count") {
       const currentTaskCount = tasks.length;
-      if (currentTaskCount > 0) {
-        messageToDisplay = `You currently have ${currentTaskCount} task${currentTaskCount === 1 ? '' : 's'}.`;
+      const completedTaskCount = tasks.filter(t => t.completed).length;
+      const remainingTaskCount = currentTaskCount - completedTaskCount;
+      
+      const queryType = data.reasoning?.split(":")?.[1] || "total";
+      
+      if (queryType === "remaining") {
+        if (currentTaskCount === 0) {
+          messageToDisplay = "You don't have any tasks to complete.";
+        } else if (remainingTaskCount === 0) {
+          messageToDisplay = "You have completed all your tasks! Great job!";
+        } else {
+          messageToDisplay = `You need to complete ${remainingTaskCount} more task${remainingTaskCount === 1 ? '' : 's'}.`;
+        }
+      } else if (queryType === "completed") {
+        if (currentTaskCount === 0) {
+          messageToDisplay = "You have no tasks in your list.";
+        } else if (completedTaskCount === 0) {
+          messageToDisplay = "You haven't completed any tasks yet.";
+        } else {
+          messageToDisplay = `You have completed ${completedTaskCount} task${completedTaskCount === 1 ? '' : 's'} out of ${currentTaskCount} total.`;
+        }
       } else {
-        messageToDisplay = "You currently have no tasks.";
-      }
-      // Log AI's original reasoning if different, for debugging, but don't use it for user display.
-      if (data.reasoning && data.reasoning !== "You're asking about your task count. The application will provide this information.") {
-        console.log("AI reasoning for task count query (overridden by client):", data.reasoning);
+        if (currentTaskCount > 0) {
+          messageToDisplay = `You have ${currentTaskCount} task${currentTaskCount === 1 ? '' : 's'} in total (${completedTaskCount} completed, ${remainingTaskCount} remaining).`;
+        } else {
+          messageToDisplay = "You currently have no tasks.";
+        }
       }
       toast({
         title: "AI Assistant",
@@ -133,6 +152,7 @@ export default function HomePage() {
       toast({
         title: "AI Assistant",
         description: messageToDisplay,
+        duration: 3000, // Show for 3 seconds
       });
     } else { // Default to "add_tasks" or other unhandled actions
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];

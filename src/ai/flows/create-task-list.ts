@@ -1,4 +1,3 @@
-
 'use server';
 
 /**
@@ -14,16 +13,25 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+const TaskActions = {
+  ADD_TASKS: "add_tasks",
+  CLEAR_ALL_TASKS: "clear_all_tasks",
+  COMPLETE_ALL_TASKS: "complete_all_tasks",
+  QUERY_TASK_COUNT: "query_task_count",
+  NO_ACTION_REPLY: "no_action_conversational_reply"
+} as const;
+
+type TaskAction = typeof TaskActions[keyof typeof TaskActions];
+
 /**
  * Defines the input schema for the task creation flow.
  * @property {string} prompt - A user's natural language request for tasks or a command.
  * @property {number} [currentTaskCount] - The current number of tasks the user has. Used for queries about task count. This might be slightly delayed from the absolute current count if tasks were just added client-side.
  */
 const CreateTaskListInputSchema = z.object({
-  prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list, or a command like "delete all tasks", "complete all tasks", "how many tasks do I have?", or a simple greeting/query like "hello" or "what can you do?".'),
-  currentTaskCount: z.number().optional().describe('The current number of tasks the user has. Used for queries about task count. This might be slightly delayed from the absolute current count if tasks were just added client-side.'),
+  prompt: z.string().describe('A prompt describing tasks or commands.'),
+  currentTaskCount: z.number().optional().describe('Current task count.'),
 });
-export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
 
 /**
  * Defines the output schema for the task creation flow.
@@ -32,10 +40,17 @@ export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
  * @property {"add_tasks" | "clear_all_tasks" | "complete_all_tasks" | "query_task_count" | "no_action_conversational_reply"} [action] - The intended action, query type, or reply type based on the prompt. Defaults to 'add_tasks'.
  */
 const CreateTaskListOutputSchema = z.object({
-  taskList: z.array(z.string()).describe('An array of task strings. Contains tasks if action is "add_tasks", or an empty array if action is "clear_all_tasks", "complete_all_tasks", "query_task_count", "no_action_conversational_reply", or if no tasks were generated.'),
-  reasoning: z.string().optional().describe('A brief, friendly message for the user, summarizing what was done, answering a query, providing a conversational reply, or explaining any issues encountered.'),
-  action: z.enum(["add_tasks", "clear_all_tasks", "complete_all_tasks", "query_task_count", "no_action_conversational_reply"]).optional().describe("The intended action, query type, or reply type based on the prompt. Defaults to 'add_tasks' if not specified or if the prompt is for task creation."),
+  taskList: z.array(z.string()),
+  reasoning: z.string().optional(),
+  action: z.enum([
+    "add_tasks",
+    "clear_all_tasks",
+    "complete_all_tasks",
+    "query_task_count",
+    "no_action_conversational_reply"
+  ]).optional(),
 });
+export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
 export type CreateTaskListOutput = z.infer<typeof CreateTaskListOutputSchema>;
 
 /**
@@ -45,7 +60,8 @@ export type CreateTaskListOutput = z.infer<typeof CreateTaskListOutputSchema>;
  * @returns {Promise<CreateTaskListOutput>} A promise that resolves to the structured task list or action/query/greeting response.
  */
 export async function createTasklist(input: CreateTaskListInput): Promise<CreateTaskListOutput> {
-  return createTasklistFlow(input);
+  const result = await createTasklistFlow(input);
+  return result;
 }
 
 const prompt = ai.definePrompt({
@@ -53,231 +69,293 @@ const prompt = ai.definePrompt({
   input: {schema: CreateTaskListInputSchema},
   output: {schema: CreateTaskListOutputSchema},
   prompt: `
-You are an expert personal assistant that converts user requests into structured to-do lists OR recognizes specific commands OR answers specific queries OR provides simple conversational replies.
+You are a concise task management assistant. Keep all responses brief and to the point.
 
-Your main goal is to determine the user's intent based on their prompt.
-The user might provide 'currentTaskCount' which is the number of tasks they currently have. This count might be slightly stale if tasks were just added on the client.
+Your main goal is to:
+1. Distinguish between task creation requests and general conversation
+2. Only create tasks when explicitly requested
+3. Keep ALL responses under 150 characters
+4. Never repeat characters or words unnecessarily
+5. Give clear, concise, and professional responses
+6. Default to short conversational replies unless tasks are clearly requested
+
+For task completion and count queries:
+- Detect phrases like "mark all as done", "complete everything", "finish all tasks"
+- Detect phrases like "how many tasks", "task count", "tasks remaining", "completed tasks", "tasks done"
+- Use the "complete_all_tasks" action for completion commands
+- Use the "query_task_count" action for count queries
+- When user asks about completed tasks specifically, include "completed" in the reasoning
 
 **Output Structure:**
-You MUST respond with a JSON object adhering to the 'CreateTaskListOutputSchema'.
-The schema includes:
-- 'taskList': An array of strings.
-- 'reasoning': A message for the user.
-- 'action': (Optional) An enum that can be "add_tasks", "clear_all_tasks", "complete_all_tasks", "query_task_count", or "no_action_conversational_reply".
+- taskList: Array of task strings
+- reasoning: Brief, one-line message
+- action: One of:
+  * "add_tasks" - Creating new tasks
+  * "clear_all_tasks" - Clearing all tasks
+  * "complete_all_tasks" - Completing all tasks
+  * "query_task_count" - Asking about task count
+  * "no_action_conversational_reply" - Brief replies
 
-**Core Logic & Rules (Evaluate in this order of precedence):**
+**Action Rules:**
 
-1.  **Command Detection - Clear List (Highest Precedence):**
-    *   If the user's prompt very clearly and directly indicates a desire to delete, clear, or remove all tasks from their list (e.g., "delete all tasks", "clear all my tasks", "remove every task", "empty my list", "clear all task", "clear all the task", "delete all the tasks", "nuke my list", "clear my tasks", "delete my tasks", "wipe tasks"):
-        *   Set the 'action' field to "clear_all_tasks". This is MANDATORY.
-        *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to clear all tasks. Your list will be emptied."
-    *   **Crucially: Do NOT** create a task named "Delete all tasks", "Clear all tasks", or similar if the intent is to clear the list. This rule overrides all other rules if a clear command is detected.
+1. Task Creation Detection:
+   - Create tasks when user asks to create/add/make/schedule tasks
+   - Look for task-creation phrases: "create task", "add task", "make a list", "schedule my day"
+   - Detect scheduling requests with time mentions (e.g., "wake up at 9 AM")
+   - When in doubt about task creation, ask for clarification
 
-2.  **Command Detection - Mark All Tasks Complete (High Precedence):**
-    *   If the user's prompt clearly indicates a desire to mark all tasks as completed (e.g., "make all tasks completed", "complete all tasks", "mark all as done", "finish all tasks", "mark all tasks as complete", "make all the task as completed", "complete every task", "mark everything as done", "all tasks done"):
-        *   Set the 'action' field to "complete_all_tasks". This is MANDATORY.
-        *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated."
-    *   **Crucially: Do NOT** create a task named "Mark all tasks completed" or similar if the intent is to complete all tasks. This rule is very important.
+2. Conversation Detection:
+   - Treat greetings as conversation ("hi", "hey", "hello", "how are you")
+   - Treat questions as conversation unless explicitly about tasks
+   - Treat statements without clear task intent as conversation
+   - Always use "no_action_conversational_reply" for conversation
 
-3.  **Conversational Interaction (Greeting or Capability Query - High Precedence):**
-    *   If the user's prompt is a simple, common greeting or conversational opener (e.g., "hi", "hello", "hey", "how are you", "what's up", "good morning", "good afternoon", "good evening") OR if it's a query about your capabilities (e.g., "what can you do?", "what are your features?", "how do you work?", "how can you help me?", "tell me about yourself"):
-        *   Set the 'action' field to "no_action_conversational_reply". This is MANDATORY.
-        *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   If it's a greeting, the 'reasoning' field should be a short, polite, and friendly acknowledgment. Examples: "Hello! How can I help you with your tasks today?", "I'm doing well, thanks! Ready to tackle some tasks?", "Hi there! What can I do for you regarding your to-do list?"
-        *   If it's a capability query, the 'reasoning' field should be a helpful summary of what you can do. Example: "I can help you create to-do lists from your requests, clear your entire list, mark all tasks as complete, and tell you how many tasks you currently have. Just type what you need!"
-    *   Do NOT create a task from these greetings or capability queries.
+3. Multiple Tasks Detection (only when task creation is requested):
+   - Split lists (commas, and, numbers)
+   - Break down complex items into subtasks
+   - Keep each task brief and clear
 
-4.  **Query - Task Count (Informational - Strict Matching):**
-    *   If the user's prompt is a question *specifically* asking for the number or quantity of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have", "how many tsk i have?", "count my tasks"):
-        *   The 'action' field in your JSON output MUST BE "query_task_count". This is MANDATORY for this rule.
-        *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field MUST be exactly the string: "You're asking about your task count. The application will provide this information." The application uses this specific string internally when the action is "query_task_count", but will display a different message to the user with the actual count. Your role is to provide this exact string for reasoning if this rule is matched.
-    *   Do NOT create a task like "How many tasks do I have". This is an informational query. Ensure 'action' is "query_task_count". This rule is very important for the application to function correctly.
-    *   Queries like "what is my first task" or "details about task X" or "what can you do" do NOT fall under this rule (they are handled by Rule 3 or Rule 8).
+2. Response Format:
+   - Each task should be 2-7 words
+   - Reasoning message max 50 characters
+   - Clear, actionable language
 
-5.  **Single Conceptual Task Identification (Action: "add_tasks"):**
-    *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
-        *   Set the 'action' field to "add_tasks" (or omit it, as "add_tasks" is the default).
-        *   The 'taskList' output should contain **ONLY ONE** string. This string should be a concise, actionable rephrasing of the user's request, ideally starting with a verb and properly capitalized.
-        *   Examples:
-            *   User: "buy milk" -> AI \`taskList\` output: \`["Buy milk"]\`
-            *   User: "i want to make chicken" -> AI \`taskList\` output: \`["Make chicken"]\`
-            *   User: "need to get some bread from the store" -> AI \`taskList\` output: \`["Get bread from the store"]\`
-            *   User: "research quantum computing" -> AI \`taskList\` output: \`["Research quantum computing"]\`
-        *   The 'reasoning' field should be like: "Okay, I've added '[Rephrased Task Name]' to your list. You can get more details or a breakdown using the info button!"
-    *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns.
+Examples:
 
-6.  **Multiple Distinct Tasks Intent (Action: "add_tasks"):**
-    *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it explicitly asks for a plan involving several separate items, or lists multiple distinct actions:
-        *   Set the 'action' field to "add_tasks" (or omit it).
-        *   Break it down into a 'taskList' with multiple strings. Each string should be a distinct task.
-        *   Example: User: "plan my week" -> \`taskList\`: \`["Review weekly goals", "Schedule key meetings", "Allocate time for deep work"]\`, \`action\`: \`"add_tasks"\`
-        *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
+Input: "hey how are you" or "hello"
+{
+  "action": "no_action_conversational_reply",
+  "taskList": [],
+  "reasoning": "Hi there! I'm doing great, thanks for asking. How can I help you today?"
+}
 
-7.  **Random/Generic Task Generation (Action: "add_tasks"):**
-    *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND the user asks for a specific number of random, generic, or example tasks (e.g., "give me 10 random tasks", "generate 5 sample tasks", "create 3 tasks for today"):
-        *   Set the 'action' field to "add_tasks" (or omit it).
-        *   Your 'taskList' output MUST contain that many placeholder tasks, like "Random Task 1", "Random Task 2", etc.
-        *   Example: User: "give me 3 random tasks" -> AI \`taskList\`: \`["Random Task 1", "Random Task 2", "Random Task 3"]\`, \`action\`: \`"add_tasks"\`
-        *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
+Input: "Can you schedule my day I wake up at 9 AM and sleep at 1 AM"
+{
+  "action": "add_tasks",
+  "taskList": [
+    "Wake up at 9:00 AM",
+    "Plan morning routine",
+    "Schedule day activities",
+    "Prepare for bedtime at 1:00 AM"
+  ],
+  "reasoning": "Created daily schedule tasks"
+}
 
-8.  **Ambiguous Prompts (Default to "add_tasks" - Single Task):**
-    *   If the prompt is NOT a command, greeting, or query (as per Rules 1, 2, 3 or 4), AND it is ambiguous or unclear for list generation (and doesn't fit rules 5, 6, or 7, e.g. "what is my first task" or general questions not covered by Rule 3):
-        *   Set the 'action' field to "add_tasks" (or omit it).
-        *   The 'taskList' MUST contain **EXACTLY ONE** string. This string should be the user's full prompt, but try to capitalize it properly (e.g., "whats is in my first task" becomes "Whats is in my first task").
-        *   The 'reasoning' field should be: "I've created a task based on your input: '[User's Full Prompt capitalized]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
-    *   **Do NOT** generate multiple identical tasks from such an input. The taskList must contain only one item. For example, if user says "what is my first task", the taskList should be \`["What is my first task"]\`.
+Input: "what can you do?" or "what should I do today?"
+{
+  "action": "no_action_conversational_reply",
+  "taskList": [],
+  "reasoning": "I can help create task lists and daily schedules. Just tell me what you'd like to plan!"
+}
+
+Input: "create tasks for optics and electrostatics" or "Optics electrostatics"
+{
+  "action": "add_tasks",
+  "taskList": [
+    "Study optical phenomena",
+    "Learn electrostatic forces",
+    "Practice optics problems",
+    "Review electrostatic fields"
+  ],
+  "reasoning": "Created focused physics study tasks"
+}
+
+Input: "create a task list for my trip to japan" or "I need to make tasks for japan trip"
+{
+  "action": "add_tasks",
+  "taskList": [
+    "Book flights",
+    "Reserve hotels",
+    "Plan itinerary",
+    "Check passport"
+  ],
+  "reasoning": "Created 4 travel planning tasks"
+}
+
+Input: "physics concepts to study"
+{
+  "action": "no_action_conversational_reply",
+  "taskList": [],
+  "reasoning": "Would you like me to create specific tasks for physics concepts? Just say 'create tasks for' followed by the topics."
+}
+
+Input: "create tasks for optics and electrostatics"
+{
+  "action": "add_tasks",
+  "taskList": [
+    "Study optics fundamentals",
+    "Practice electrostatics problems",
+    "Review electric fields",
+    "Learn optical phenomena"
+  ],
+  "reasoning": "Created tasks for optics and electrostatics"
+}
 
 **User Input:**
 Prompt: "{{{prompt}}}"
-{{#if currentTaskCount}}User's client reported task count: {{{currentTaskCount}}} (may be slightly stale for task count queries){{/if}}
+{{#if currentTaskCount}}Tasks: {{{currentTaskCount}}}{{/if}}
 
-**Instructions:**
-Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format.
-Ensure 'taskList' is always an array of strings.
-Set the 'action' field appropriately based on the rules above. If no specific command, greeting, or query is detected or the intent is task creation, 'action' should be "add_tasks" or can be omitted.
-Prioritize Rules 1, 2, 3 and 4 for command/greeting/query detection.
-For Rule 4 (Task Count Query), it is CRITICAL that the 'action' field is set to "query_task_count" and the 'reasoning' field is exactly "You're asking about your task count. The application will provide this information.".
-For Rule 3 (Conversational Interaction), it is CRITICAL that 'action' is "no_action_conversational_reply".
-For Rule 8 (Ambiguous Prompts), it is CRITICAL that 'taskList' contains only ONE item.
-These prioritizations are essential for correct application behavior.
-`,
+Keep all responses concise and actionable.`
 });
 
-const createTasklistFlow = ai.defineFlow(
-  {
-    name: 'createTasklistFlow',
-    inputSchema: CreateTaskListInputSchema,
-    outputSchema: CreateTaskListOutputSchema,
-  },
-  async (input: CreateTaskListInput) => {
-    try {
-      const {output} = await prompt(input);
-
-      let taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
-      let reasoning = output?.reasoning;
-      const action = output?.action || "add_tasks";
-
-      // Post-processing to enforce single task for Rule 8 if AI misbehaves
-      if (action === "add_tasks" && taskList.length > 1) {
-        const promptLowerTrimmed = input.prompt.trim().toLowerCase();
-        // Check if all tasks, when trimmed and lowercased, match the trimmed and lowercased prompt
-        const allTasksMatchPrompt = taskList.every(task => task.trim().toLowerCase() === promptLowerTrimmed);
-        
-        if (allTasksMatchPrompt && taskList.length > 0) {
-           console.warn(`AI returned multiple identical tasks matching the prompt. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
-           // Ensure the single task is also trimmed and uses the first (potentially capitalized) version
-           taskList = [taskList[0].trim()]; 
-        } else {
-            // More general check: if all tasks in the list are identical to each other (even if not matching the prompt directly),
-            // and the prompt was short/simple, it might be a misapplication of Rule 5 or 6.
-            const uniqueTasks = Array.from(new Set(taskList.map(t => t.trim())));
-            if (uniqueTasks.length === 1 && taskList.length > 1) {
-                // A simple heuristic: if the prompt doesn't contain obvious list indicators like "and", ",", "plan", "list of"
-                // and the AI produced multiple identical tasks, it's likely an error.
-                const seemsLikeSingleRequest = !/(\band\b|,|plan|list of)/i.test(input.prompt);
-                if (seemsLikeSingleRequest) {
-                    console.warn(`AI returned multiple identical tasks for a prompt that seems to be a single request. Reducing to one. Prompt: "${input.prompt}", Original TaskList: ${JSON.stringify(taskList)}`);
-                    taskList = [uniqueTasks[0]]; // uniqueTasks are already trimmed
-                }
-            }
-        }
-      }
-
-
-      if (!reasoning) {
-        if (action === "clear_all_tasks") {
-          reasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
-        } else if (action === "complete_all_tasks") {
-          reasoning = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated accordingly.";
-        } else if (action === "query_task_count") {
-          reasoning = "You're asking about your task count. The application will provide this information.";
-        } else if (action === "no_action_conversational_reply") {
-          // Default reasoning for conversational reply - check input for capability query
-          const lowerPrompt = input.prompt.toLowerCase();
-          if (lowerPrompt.includes("what can you do") || lowerPrompt.includes("how can you help") || lowerPrompt.includes("features") || lowerPrompt.includes("tell me about yourself")) {
-            reasoning = "I can help you create to-do lists, manage them, and even provide some insights into individual tasks. Try asking me to 'plan your day' or 'add a task to buy groceries'.";
-          } else {
-            reasoning = "Hello! How can I help you with your tasks today?";
-          }
-        } else if (taskList.length > 0 && action === "add_tasks") {
-           if (taskList.length === 1) {
-             const singleTaskText = taskList[0].trim();
-             const inputPromptTrimmedLower = input.prompt.trim().toLowerCase();
-             const taskTextTrimmedLower = singleTaskText.trim().toLowerCase();
-             
-             let capitalizedInputPrompt = input.prompt.trim();
-             if (capitalizedInputPrompt.length > 0) {
-                capitalizedInputPrompt = capitalizedInputPrompt.charAt(0).toUpperCase() + capitalizedInputPrompt.slice(1);
-             }
-
-             if (taskTextTrimmedLower === inputPromptTrimmedLower || singleTaskText === capitalizedInputPrompt) { 
-                reasoning = `I've created a task based on your input: '${singleTaskText}'. If this wasn't what you meant, try rephrasing or use the info button for more options.`;
-             } else { 
-                reasoning = `Okay, I've added '${singleTaskText}' to your list. You can get more details or a breakdown using the info button!`;
-             }
-          } else { 
-            reasoning = `Alright, I've drafted a plan with ${taskList.length} task(s) for you!`;
-          }
-        } else if (taskList.length === 0 && action === "add_tasks") {
-           let capitalizedPrompt = input.prompt.trim();
-           if (capitalizedPrompt.length > 0) {
-              capitalizedPrompt = capitalizedPrompt.charAt(0).toUpperCase() + capitalizedPrompt.slice(1);
-           }
-           reasoning = `I've processed your request: '${capitalizedPrompt}'. No specific tasks were generated. If you intended to create tasks, try rephrasing.`;
-        } else {
-          reasoning = "AI processed your request.";
-          if (taskList.length > 0) reasoning += ` ${taskList.length} task(s) were affected.`;
-          else if (action !== "add_tasks") reasoning += ` The action was '${action}'.`;
-          else reasoning += " No tasks were generated or specific action taken. You can try rephrasing your request."
-        }
-      }
-
-      // Final check: if action is not add_tasks, taskList should be empty.
-      if ((action === "clear_all_tasks" || action === "complete_all_tasks" || action === "query_task_count" || action === "no_action_conversational_reply") && taskList.length > 0) {
-        console.warn(`AI returned action:'${action}' but non-empty taskList. Overriding taskList to empty. Original reasoning: "${output?.reasoning}", TaskList: ${JSON.stringify(output?.taskList)}`);
-        let finalReasoning = reasoning; 
-        if (!output?.reasoning) { 
-            if (action === "clear_all_tasks") finalReasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
-            else if (action === "complete_all_tasks") finalReasoning = "Okay, I've processed your request to mark all tasks as completed.";
-            else if (action === "query_task_count") finalReasoning = "You're asking about your task count. The application will provide this information.";
-            else if (action === "no_action_conversational_reply") {
-                 const lowerPrompt = input.prompt.toLowerCase();
-                 if (lowerPrompt.includes("what can you do") || lowerPrompt.includes("how can you help") || lowerPrompt.includes("features") || lowerPrompt.includes("tell me about yourself")) {
-                    finalReasoning = "I can help you create to-do lists from your requests, manage them, and even provide some insights into individual tasks. Try asking me to 'plan your day' or 'add a task to buy groceries'.";
-                  } else {
-                    finalReasoning = "Hello! How can I help you today?";
-                  }
-            }
-        }
-        return { taskList: [], reasoning: finalReasoning, action };
-      }
-
-      return { taskList, reasoning, action };
-    } catch (error) {
-      console.error("Error calling AI model in createTasklistFlow:", error);
-      const errorMessage = (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string')
-        ? error.message
-        : 'An unknown error occurred with the AI service.';
-
-      let userFriendlyMessage = "I'm having trouble connecting to the AI service right now. Please try again in a few moments.";
-      if (errorMessage.includes('503') || errorMessage.toLowerCase().includes('overloaded') || errorMessage.toLowerCase().includes('unavailable')) {
-        userFriendlyMessage = "The AI service is currently overloaded or unavailable. Please try again in a little while.";
-      } else if (errorMessage.toLowerCase().includes('api key')) {
-        userFriendlyMessage = "There seems to be an issue with the AI service configuration. Please contact support.";
-      } else if (errorMessage.toLowerCase().includes('malformed') || errorMessage.toLowerCase().includes('parse')) {
-        userFriendlyMessage = "The AI returned an unexpected response. I'll try to handle it, but you might want to rephrase your request.";
-      }
-      
+const createTasklistFlow = ai.defineFlow({
+  name: 'createTasklistFlow',
+  inputSchema: CreateTaskListInputSchema,
+  outputSchema: CreateTaskListOutputSchema,
+}, async (input) => {
+  try {
+    const {output} = await prompt(input);
+    
+    if (!output) {
       return {
         taskList: [],
-        reasoning: userFriendlyMessage,
-        action: "add_tasks" 
+        reasoning: "Could not process the request. Please try again.",
+        action: "no_action_conversational_reply" as const
       };
     }
-  }
-);
 
+    let taskList = output.taskList || [];
+    let reasoning = output.reasoning || "Task processing completed.";
+    let processedAction = output.action || "no_action_conversational_reply";
+
+    // Detect delete/clear tasks command
+    const clearCommands = [
+      'delete all',
+      'clear all',
+      'remove all',
+      'delete tasks',
+      'clear tasks',
+      'remove tasks'
+    ];
+    if (clearCommands.some(cmd => input.prompt.toLowerCase().includes(cmd))) {
+      return {
+        taskList: [],
+        reasoning: "Clearing all tasks from your list.",
+        action: "clear_all_tasks" as const
+      };
+    }
+
+    // Detect task count queries
+    const countQueries = [
+      'how many',
+      'task count',
+      'number of',
+      'tasks left',
+      'remaining tasks',
+      'tasks do i have',
+      'tasks i have'
+    ];
+    if (countQueries.some(query => input.prompt.toLowerCase().includes(query))) {
+      return {
+        taskList: [],
+        reasoning: input.prompt.toLowerCase().includes('complete') ? "query:completed" : "query:total",
+        action: "query_task_count" as const
+      };
+    }
+
+    // Detect scheduling and planning requests
+    const isSchedulingRequest = input.prompt.toLowerCase().includes('schedule') || 
+                               (input.prompt.toLowerCase().includes('wake up') && 
+                                input.prompt.toLowerCase().includes('sleep'));
     
+    if (isSchedulingRequest) {
+      const wakeTimeMatch = input.prompt.match(/wake up at (\d{1,2}(?::\d{2})?\s*[AaPp][Mm])/);
+      const sleepTimeMatch = input.prompt.match(/sleep at (\d{1,2}(?::\d{2})?\s*[AaPp][Mm])/);
+      
+      const wakeTime = wakeTimeMatch ? wakeTimeMatch[1] : '9:00 AM';
+      const sleepTime = sleepTimeMatch ? sleepTimeMatch[1] : '1:00 AM';
+      
+      taskList = [
+        `Wake up at ${wakeTime}`,
+        'Brush teeth and freshen up',
+        'Morning exercise routine',
+        'Breakfast time',
+        'Start daily work/study',
+        'Lunch break',
+        'Continue work/study',
+        'Evening relaxation',
+        'Dinner time',
+        'Evening routine',
+        `Prepare for bed by ${sleepTime}`
+      ];
+      
+      reasoning = 'Created a daily schedule for you';
+      processedAction = 'add_tasks';
+    }
+
+    // Check if this is a greeting or conversational input
+    const isGreeting = input.prompt.toLowerCase().match(/\b(hi|hey|hello|greetings|how are you)\b/);
+    if (isGreeting) {
+      return {
+        taskList: [],
+        reasoning: "Hi! I'm here to help with your tasks. What would you like to do?",
+        action: "no_action_conversational_reply" as const
+      };
+    }
+
+    // Check if this is a direct topic mention without explicit task creation request
+    const hasTaskWords = input.prompt.toLowerCase().match(/\b(task|tasks|todo|todos|schedule|plan)\b/);
+    const isDirectTopic = !input.prompt.toLowerCase().includes('create') && 
+                         !input.prompt.toLowerCase().includes('add') &&
+                         !input.prompt.toLowerCase().includes('make') &&
+                         !input.prompt.toLowerCase().includes('need') &&
+                         !input.prompt.toLowerCase().includes('schedule');
+                         
+    if (isDirectTopic && !isGreeting && hasTaskWords) {
+      return {
+        taskList: [],
+        reasoning: "Would you like me to create tasks for these topics? Just say 'create tasks for' followed by the topics.",
+        action: "no_action_conversational_reply" as const
+      };
+    }
+
+    // Post-process tasks if we're adding them
+    if (processedAction === "add_tasks" && taskList.length > 0) {
+      // Clean up tasks
+      taskList = taskList
+        .map(task => task.trim())
+        .filter(task => task.length > 0)
+        .map(task => task.charAt(0).toUpperCase() + task.slice(1));
+
+      // Remove duplicates while preserving order
+      taskList = Array.from(new Set(taskList));
+
+      // Update reasoning if none provided
+      if (!output.reasoning) {
+        reasoning = taskList.length === 1
+          ? `Added task: "${taskList[0]}"`
+          : `Created ${taskList.length} tasks for you!`;
+      }
+    } else if (processedAction === "no_action_conversational_reply") {
+      // Ensure conversational replies are concise and not repetitive
+      if (!output.reasoning || output.reasoning.length > 150) {
+        reasoning = "I can help you create and manage task lists. What would you like to do?";
+      }
+    } else if (processedAction === "complete_all_tasks") {
+      // Reasoning for completing all tasks will be overridden by client-side logic
+      // to reflect actual state changes
+      reasoning = output.reasoning || "Processing request to complete all tasks...";
+    } else if (processedAction === "query_task_count") {
+      // Analyze the query type from input and pass it through reasoning
+      const query = input.prompt.toLowerCase();
+      const isRemainingQuery = query.includes("need to") || 
+                              query.includes("left to") ||
+                              query.includes("still have to");
+      const isCompletedQuery = query.includes("completed") || 
+                              query.includes("finished");
+      
+      reasoning = isRemainingQuery ? "query:remaining" :
+                 isCompletedQuery ? "query:completed" : "query:total";
+    }
+
+    return { taskList, reasoning, action: processedAction };
+  } catch (error) {
+    console.error('Error in createTasklistFlow:', error);
+    return {
+      taskList: [],
+      reasoning: "An error occurred while processing your request. Please try again.",
+      action: "no_action_conversational_reply" as const
+    };
+  }
+});
+

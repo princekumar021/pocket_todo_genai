@@ -11,7 +11,7 @@ import { provideTaskInsight, TaskInsightOutput } from "@/ai/flows/task-insight";
 import type { CreateTaskListOutput } from "@/ai/flows/create-task-list";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Terminal, Info } from "lucide-react";
+import { Terminal } from "lucide-react";
 
 const LOCAL_STORAGE_KEY = "pocketTasksAI_tasks";
 
@@ -61,25 +61,41 @@ export default function HomePage() {
   };
 
   const handleToggleComplete = (id: string) => {
-    setTasks(
-      tasks.map((task) =>
+    setTasks((prevTasks) =>
+      prevTasks.map((task) =>
         task.id === id ? { ...task, completed: !task.completed } : task
       )
     );
+    const updatedTask = tasks.find(task => task.id === id);
+    if (updatedTask) {
+      toast({
+        title: `Task ${updatedTask.completed ? "marked as incomplete" : "completed!"}`,
+        description: `"${updatedTask.text}" state updated.`,
+      });
+    }
   };
 
   const handleDeleteTask = (id: string) => {
+    const taskToDelete = tasks.find(task => task.id === id);
     setTasks((prevTasks) => prevTasks.filter((task) => task.id !== id));
-    toast({
-      title: "Task deleted",
-      description: "The task has been removed from your list.",
-      variant: "destructive"
-    });
+    if (taskToDelete) {
+      toast({
+        title: "Task deleted",
+        description: `"${taskToDelete.text}" has been removed.`,
+        variant: "destructive"
+      });
+    } else {
+      toast({
+        title: "Task deleted",
+        description: "The task has been removed from your list.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleUpdateTaskText = (id: string, newText: string) => {
-    setTasks(
-      tasks.map((task) => (task.id === id ? { ...task, text: newText } : task))
+    setTasks((prevTasks) =>
+      prevTasks.map((task) => (task.id === id ? { ...task, text: newText } : task))
     );
      toast({
       title: "Task updated!",
@@ -100,7 +116,7 @@ export default function HomePage() {
       setInsightData(insight);
     } catch (error) {
       console.error("Failed to get task insight:", error);
-      setInsightData(null); // Ensure no stale data on error
+      setInsightData(null); 
       toast({
         title: "Error fetching insight",
         description: "Could not retrieve AI insights for this task. Please try again.",
@@ -114,7 +130,7 @@ export default function HomePage() {
   const handleAddSubTasksToList = (subTaskTexts: string[], parentTaskText: string) => {
     const newSubTasks: Task[] = subTaskTexts.map(text => ({
       id: crypto.randomUUID(),
-      text: `Sub-task for "${parentTaskText}": ${text}`, // Prefix to show relation
+      text: `Sub-task for "${parentTaskText}": ${text}`, 
       completed: false,
     }));
     setTasks(prevTasks => [...newSubTasks, ...prevTasks]);
@@ -122,7 +138,6 @@ export default function HomePage() {
       title: "Sub-tasks added!",
       description: `${newSubTasks.length} sub-tasks related to "${parentTaskText}" have been added to your list.`,
     });
-    // Clear AI message from list creation if it's still showing
     setAiMessage(null); 
   };
 

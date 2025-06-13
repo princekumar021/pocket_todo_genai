@@ -58,8 +58,28 @@ const provideTaskInsightFlow = ai.defineFlow(
     inputSchema: TaskInsightInputSchema,
     outputSchema: TaskInsightOutputSchema,
   },
-  async input => {
-    const {output} = await prompt(input);
-    return output!;
+  async (input): Promise<TaskInsightOutput> => {
+    try {
+      const {output} = await prompt(input);
+      if (!output) {
+        console.warn("AI returned no output for task insight for task:", input.task);
+        return {
+          estimatedTimeToComplete: "Not available",
+          potentialDependencies: "Not available",
+          additionalNotes: "AI could not provide specific insights for this task at the moment.",
+          subTasks: [],
+        };
+      }
+      return output;
+    } catch (error) {
+      console.error("Error calling AI model in provideTaskInsightFlow:", error);
+      return {
+        estimatedTimeToComplete: "Error",
+        potentialDependencies: "Error",
+        additionalNotes: "I'm having trouble connecting to the AI service for insights. Please try again in a few moments.",
+        subTasks: [],
+      };
+    }
   }
 );
+

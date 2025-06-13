@@ -41,16 +41,20 @@ export default function HomePage() {
         }
       } catch (error) {
         console.error("Failed to parse tasks from localStorage", error);
-        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        localStorage.removeItem(LOCAL_STORAGE_KEY); // Clear corrupted data
       }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(tasks));
+    // Only run on client after mount to avoid SSR/localStorage mismatch
+    if (typeof window !== "undefined") {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(tasks));
+    }
   }, [tasks]);
 
   const handleListCreated = (data: CreateTaskListOutput) => {
+    setIsFormProcessing(true); // Set immediately
     const newTasks: Task[] = data.taskList.map((text) => ({
       id: crypto.randomUUID(),
       text,
@@ -62,6 +66,7 @@ export default function HomePage() {
       title: "Task list created!",
       description: data.reasoning || "AI has generated your tasks.",
     });
+    // setIsFormProcessing(false) is handled by TaskForm's finally block
   };
 
   const handleToggleComplete = (id: string) => {
@@ -85,7 +90,6 @@ export default function HomePage() {
         description: `"${toggledTaskDescription}" state updated.`,
       });
     } else {
-      // This case should ideally not happen if ID is always valid
       console.warn(`Task with ID ${id} not found for toggling.`);
       toast({
         title: "Error",
@@ -96,46 +100,59 @@ export default function HomePage() {
   };
 
   const handleDeleteTask = (id: string) => {
-    const taskToDelete = tasks.find(task => task.id === id);
+    let deletedTaskDescription = "";
+    setTasks((prevTasks) => {
+      const taskToDelete = prevTasks.find(task => task.id === id);
+      if (taskToDelete) {
+        deletedTaskDescription = taskToDelete.text;
+      }
+      return prevTasks.filter((task) => task.id !== id);
+    });
 
-    if (!taskToDelete) {
-      console.warn(`Task with ID ${id} not found for deletion.`);
+    if (deletedTaskDescription) {
+      toast({
+        title: "Task deleted",
+        description: `"${deletedTaskDescription}" has been removed.`,
+      });
+    } else {
+      // This case should ideally not happen if ID is always valid and list hasn't changed unexpectedly
+      console.warn(`Task with ID ${id} not found for deletion during state update.`);
       toast({
         title: "Error",
         description: "Could not find the task to delete.",
         variant: "destructive",
       });
-      return;
     }
-
-    setTasks((prevTasks) => prevTasks.filter((task) => task.id !== id));
-
-    toast({
-      title: "Task deleted",
-      description: `"${taskToDelete.text}" has been removed.`,
-      variant: "destructive"
-    });
   };
 
   const handleUpdateTaskText = (id: string, newText: string) => {
-    // TaskItemDisplay already ensures this is called only if text is different.
+     let originalTaskText = "";
     setTasks((prevTasks) =>
-      prevTasks.map((task) => (task.id === id ? { ...task, text: newText } : task))
+      prevTasks.map((task) => {
+        if (task.id === id) {
+          originalTaskText = task.text;
+          return { ...task, text: newText };
+        }
+        return task;
+      })
     );
-     toast({
+    // The toast assumes the update was successful and text was different.
+    // TaskItemDisplay should ensure not to call this if text is unchanged.
+    toast({
       title: "Task updated!",
-      description: "Your changes have been saved.",
+      description: `"${originalTaskText}" changed to "${newText}".`,
     });
   };
 
-  const handleGetTaskInsight = async (task: Task) => {
+  const handleGetTaskInsight = async (task: Task) => { // Parameter is Task, not Task | null
     if (!task || !task.id) {
       console.error("Invalid task provided for insight:", task);
       toast({
         title: "Error",
-        description: "Cannot get insights for an invalid task.",
+        description: "Cannot get insights for an invalid or non-existent task.",
         variant: "destructive",
       });
+      setIsInsightDialogOpen(false);
       return;
     }
     setTaskForInsight(task);
@@ -168,16 +185,24 @@ export default function HomePage() {
       completed: false,
     }));
     setTasks(prevTasks => [...newSubTasks, ...prevTasks]);
+    const successMessage = `${newSubTasks.length} sub-tasks related to "${parentTaskText}" have been added to your main list.`;
     toast({
       title: "Sub-tasks added!",
-      description: `${newSubTasks.length} sub-tasks related to "${parentTaskText}" have been added to your list.`,
+      description: successMessage,
     });
-    setAiMessage(`${newSubTasks.length} sub-tasks from AI insight added to your main list!`);
+    setAiMessage(successMessage);
   };
 
   const handleClearList = () => {
+    if (tasks.length === 0) {
+      toast({
+        title: "List is already empty",
+        description: "There are no tasks to remove.",
+      });
+      return;
+    }
     setTasks([]);
-    setAiMessage(null); // Clear any AI message
+    setAiMessage("All tasks have been cleared from your list.");
     toast({
       title: "List Cleared",
       description: "All tasks have been removed.",

@@ -33,58 +33,89 @@ export default function TaskItemDisplay({
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
-      // Optional: Select text on edit
-      // inputRef.current.select(); 
+      inputRef.current.select(); 
     }
   }, [isEditing]);
 
-  // Sync editText with task.text if task.text changes externally (e.g., from sub-task addition)
   useEffect(() => {
-    setEditText(task.text);
-  }, [task.text]);
+    // Sync editText if task.text changes from outside (e.g. parent re-render with new task data)
+    // and we are not currently editing. This prevents overwriting user's edits.
+    if (!isEditing) {
+      setEditText(task.text);
+    }
+  }, [task.text, isEditing]);
 
 
   const handleSave = () => {
-    if (editText.trim() === "") {
+    const trimmedText = editText.trim();
+    if (trimmedText === "") {
       toast({
         title: "Task cannot be empty",
         description: "Please enter some text for your task.",
         variant: "destructive",
       });
-      setEditText(task.text); // Reset to original text if save fails
-      setIsEditing(false);
-      return;
+      // Do not reset to task.text here, allow user to correct or cancel
+      // Re-focus to allow correction
+      inputRef.current?.focus(); 
+      return; // Keep editing mode active
     }
-    if (editText.trim() !== task.text) {
-      onUpdateText(task.id, editText.trim());
-      // Toast for update is now handled in page.tsx to ensure it's shown after state update
+    if (trimmedText !== task.text) {
+      onUpdateText(task.id, trimmedText);
+      // Toast for successful update is now handled in page.tsx
     }
     setIsEditing(false);
   };
 
   const handleCancelEdit = () => {
-    setEditText(task.text);
+    setEditText(task.text); // Reset to original text
     setIsEditing(false);
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(task.text)
-      .then(() => {
-        toast({ title: "Task copied to clipboard!" });
-      })
-      .catch(err => {
-        console.error("Failed to copy task: ", err);
-        toast({ title: "Failed to copy task", variant: "destructive" });
-      });
+    if (task && task.text) {
+      navigator.clipboard.writeText(task.text)
+        .then(() => {
+          toast({ title: "Task copied to clipboard!" });
+        })
+        .catch(err => {
+          console.error("Failed to copy task: ", err);
+          toast({ title: "Failed to copy task", variant: "destructive" });
+        });
+    }
   };
   
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
+      event.preventDefault(); // Prevent form submission if wrapped in one
       handleSave();
     } else if (event.key === 'Escape') {
       handleCancelEdit();
     }
   };
+
+  const handleLabelClick = (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent checkbox toggle if label is clicked
+    if (!task.completed) { // Only allow editing if task is not completed
+      setIsEditing(true);
+    } else {
+        toast({
+            title: "Cannot edit completed task",
+            description: "Mark the task as incomplete to edit its text.",
+        });
+    }
+  };
+  
+  const handleCheckboxChange = () => {
+    onToggleComplete(task.id);
+  };
+
+  const handleDeleteClick = () => {
+    onDelete(task.id);
+  };
+
+  const handleGetInsightClick = () => {
+    onGetInsight(task);
+  }
 
   return (
     <div className={cn(
@@ -94,9 +125,9 @@ export default function TaskItemDisplay({
       <Checkbox
         id={`task-${task.id}`}
         checked={task.completed}
-        onCheckedChange={() => onToggleComplete(task.id)}
+        onCheckedChange={handleCheckboxChange}
         aria-label={task.completed ? `Mark task "${task.text}" as incomplete` : `Mark task "${task.text}" as complete`}
-        className="border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground focus:ring-primary"
+        className="border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground focus:ring-primary shrink-0"
       />
       {isEditing ? (
         <Input
@@ -105,46 +136,49 @@ export default function TaskItemDisplay({
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={handleSave} // Save on blur
-          className="flex-grow bg-background focus:ring-accent text-sm"
+          onBlur={handleSave} 
+          className="flex-grow bg-background focus:ring-accent text-sm h-8" 
           aria-label={`Edit task text for "${task.text}"`}
         />
       ) : (
-        <label
-          htmlFor={`task-${task.id}`}
-          onClick={() => setIsEditing(true)} // Allow clicking text to edit
+        <span // Changed from label to span to avoid checkbox toggle on click
+          onClick={handleLabelClick}
           className={cn(
-            "flex-grow cursor-pointer text-foreground text-sm py-1.5", // Added padding for easier click
-            task.completed && "line-through text-muted-foreground"
+            "flex-grow cursor-pointer text-foreground text-sm py-1", 
+            task.completed && "line-through text-muted-foreground",
+            !task.completed && "hover:text-primary" // Add hover effect if not completed
           )}
+          role="button" // Make it behave like a button for accessibility
+          tabIndex={0} // Make it focusable
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleLabelClick(e as any); }} // Allow keyboard activation
         >
           {task.text}
-        </label>
+        </span>
       )}
-      <div className="flex gap-0.5 shrink-0"> {/* Reduced gap */}
+      <div className="flex gap-0.5 shrink-0">
         {isEditing ? (
           <>
-            <Button variant="ghost" size="icon" onClick={handleSave} aria-label="Save task changes">
-              <Save className="h-4 w-4 text-green-600" /> {/* Slightly smaller icons */}
+            <Button variant="ghost" size="icon" onClick={handleSave} aria-label="Save task changes" className="h-8 w-8">
+              <Save className="h-4 w-4 text-green-600" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={handleCancelEdit} aria-label="Cancel editing task">
+            <Button variant="ghost" size="icon" onClick={handleCancelEdit} aria-label="Cancel editing task" className="h-8 w-8">
               <XCircle className="h-4 w-4 text-destructive" />
             </Button>
           </>
         ) : (
           <>
-            <Button variant="ghost" size="icon" onClick={() => setIsEditing(true)} aria-label={`Edit task "${task.text}"`}>
+            <Button variant="ghost" size="icon" onClick={handleLabelClick} aria-label={`Edit task "${task.text}"`} className="h-8 w-8" disabled={task.completed}>
               <Edit3 className="h-4 w-4 text-foreground hover:text-primary" />
             </Button>
-             <Button variant="ghost" size="icon" onClick={handleCopy} aria-label={`Copy task text for "${task.text}"`}>
+             <Button variant="ghost" size="icon" onClick={handleCopy} aria-label={`Copy task text for "${task.text}"`} className="h-8 w-8">
               <Copy className="h-4 w-4 text-foreground hover:text-primary" />
             </Button>
           </>
         )}
-        <Button variant="ghost" size="icon" onClick={() => onGetInsight(task)} aria-label={`Get AI insight for task "${task.text}"`}>
+        <Button variant="ghost" size="icon" onClick={handleGetInsightClick} aria-label={`Get AI insight for task "${task.text}"`} className="h-8 w-8">
           <Info className="h-4 w-4 text-foreground hover:text-accent" />
         </Button>
-        <Button variant="ghost" size="icon" onClick={() => onDelete(task.id)} aria-label={`Delete task "${task.text}"`}>
+        <Button variant="ghost" size="icon" onClick={handleDeleteClick} aria-label={`Delete task "${task.text}"`} className="h-8 w-8">
           <Trash2 className="h-4 w-4 text-destructive hover:text-red-700" />
         </Button>
       </div>

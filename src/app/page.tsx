@@ -9,7 +9,7 @@ import TaskListDisplay from "@/components/task-list-display";
 import TaskInsightDialog from "@/components/task-insight-dialog";
 import { provideTaskInsight, TaskInsightOutput } from "@/ai/flows/task-insight";
 import { createTasklist, CreateTaskListOutput } from "@/ai/flows/create-task-list";
-import { recordTaskEvent } from "@/ai/flows/record-task-event"; // Import the new flow
+import { recordTaskEvent } from "@/ai/flows/record-task-event";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from "lucide-react";
@@ -56,46 +56,27 @@ export default function HomePage() {
   }, [tasks, isMounted]);
 
   const handleClearList = useCallback(() => {
-    setTasks(currentTasks => {
-      if (currentTasks.length === 0) {
-        toast({
-          title: "List is already empty",
-          description: "There are no tasks to remove.",
-        });
-        setAiMessage("Your list is already empty!");
-        return currentTasks; 
-      }
-      
-      if (!aiMessage) {
-         setAiMessage("All tasks have been cleared from your list.");
-      }
-      toast({
-        title: "List Cleared",
-        description: "All tasks have been removed.",
-      });
-      return []; 
-    });
-  }, [toast, aiMessage, setAiMessage]);
+    const currentTaskCount = tasks.length;
+    setTasks([]); 
+    // aiMessage will be set by handleListCreated using AI's reasoning or flow's default
+    // toast will be shown by handleListCreated if appropriate
+    return currentTaskCount > 0; // Return true if tasks were actually cleared
+  }, [tasks]);
+
 
   const handleCompleteAllTasks = useCallback(() => {
-    setTasks(currentTasks => {
-      if (currentTasks.length === 0) {
-        // Toast will be handled by handleListCreated if called by AI
-        // AI message will be set by handleListCreated
-        return currentTasks;
-      }
-      if (currentTasks.every(task => task.completed)) {
-        // Toast will be handled by handleListCreated if called by AI
-        // AI message will be set by handleListCreated
-        return currentTasks;
-      }
-      
-      const allCompleted = currentTasks.map(task => ({ ...task, completed: true }));
-      // Toast for success will be handled by handleListCreated using AI's reasoning
-      // AI message will be set by handleListCreated using AI's reasoning
-      return allCompleted;
-    });
-  }, []);
+    const currentTaskCount = tasks.length;
+    const allTasksAlreadyCompleted = tasks.every(task => task.completed);
+    
+    if (currentTaskCount === 0 || allTasksAlreadyCompleted) {
+      return false; // Indicate no actual change was made or needed
+    }
+
+    setTasks(currentTasks => currentTasks.map(task => ({ ...task, completed: true })));
+    // aiMessage will be set by handleListCreated using AI's reasoning
+    // toast will be shown by handleListCreated
+    return true; // Indicate tasks were marked complete
+  }, [tasks]);
 
 
   const handleListCreated = useCallback((data: CreateTaskListOutput) => {
@@ -105,32 +86,36 @@ export default function HomePage() {
       if (!messageToSet) { 
         messageToSet = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
       }
-      setAiMessage(messageToSet); 
-      handleClearList(); 
-      if (tasks.length > 0) { // Only toast if there were tasks to clear
+      const tasksWereCleared = handleClearList(); 
+      if (tasksWereCleared) {
         toast({ title: "List Cleared", description: "All tasks have been removed." });
       } else {
         toast({ title: "List is already empty", description: "There are no tasks to remove." });
       }
+      setAiMessage(messageToSet); 
     } else if (data.action === "complete_all_tasks") {
       if (!messageToSet) { 
         messageToSet = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated.";
       }
-      setAiMessage(messageToSet); 
-      const currentTaskCount = tasks.length;
-      const allTasksAlreadyCompleted = tasks.every(task => task.completed);
-
-      handleCompleteAllTasks();
-
-      if (currentTaskCount === 0) {
-        toast({ title: "No tasks to complete", description: "Your list is empty." });
-      } else if (allTasksAlreadyCompleted) {
-         toast({ title: "All tasks already completed", description: "There are no pending tasks to mark as complete." });
-      } else {
+      const tasksWereUpdated = handleCompleteAllTasks();
+      if (tasksWereUpdated) {
         toast({ title: "All Tasks Completed!", description: "Great job, everything is marked as done!" });
+      } else if (tasks.length === 0) {
+        toast({ title: "No tasks to complete", description: "Your list is empty." });
+      } else {
+         toast({ title: "All tasks already completed", description: "There are no pending tasks to mark as complete." });
       }
-
-    } else { 
+      setAiMessage(messageToSet); 
+    } else if (data.action === "query_task_count") {
+      if (!messageToSet) {
+        messageToSet = "I understand you're asking about your task count. You can see this number displayed at the top of your list.";
+      }
+      setAiMessage(messageToSet);
+      toast({
+        title: "AI Assistant",
+        description: messageToSet,
+      });
+    } else { // Default to "add_tasks"
       const tasksToAdd = Array.isArray(data.taskList) ? data.taskList : [];
 
       if (tasksToAdd.length > 0) {
@@ -140,6 +125,19 @@ export default function HomePage() {
             text,
             completed: false,
           }));
+          // Record creation event for each new task
+          newTasks.forEach(task => {
+            recordTaskEvent({
+              task_id: task.id,
+              task_text: task.text,
+              event_type: "created",
+              timestamp: new Date().toISOString(),
+            }).then(response => {
+              console.log('AI History: Task creation event recorded:', response);
+            }).catch(error => {
+              console.error('AI History: Error recording task creation event:', error);
+            });
+          });
           return [...newTasks, ...prevTasks];
         });
         if (!messageToSet) { 
@@ -189,16 +187,15 @@ export default function HomePage() {
         description: `"${toggledTaskDescription}" state updated.`,
       });
 
-      // Record event for AI history
       recordTaskEvent({
         task_id: id,
         task_text: toggledTaskDescription,
         event_type: newCompletedState ? "completed" : "uncompleted",
         timestamp: new Date().toISOString(),
       }).then(response => {
-        console.log('AI History: Task event recorded:', response);
+        console.log('AI History: Task toggle event recorded:', response);
       }).catch(error => {
-        console.error('AI History: Error recording task event:', error);
+        console.error('AI History: Error recording task toggle event:', error);
       });
 
     } else {
@@ -209,22 +206,34 @@ export default function HomePage() {
         variant: "destructive",
       });
     }
-  }, [toast]); // recordTaskEvent is stable, no need to add to deps unless it becomes unstable
+  }, [toast]); 
 
   const handleDeleteTask = useCallback((id: string) => {
     let deletedTaskDescription = "";
+    let taskToDelete: Task | undefined;
+
     setTasks((prevTasks) => {
-      const taskToDelete = prevTasks.find(task => task.id === id);
+      taskToDelete = prevTasks.find(task => task.id === id);
       if (taskToDelete) {
         deletedTaskDescription = taskToDelete.text;
       }
       return prevTasks.filter((task) => task.id !== id);
     });
 
-    if (deletedTaskDescription) {
+    if (deletedTaskDescription && taskToDelete) {
       toast({
         title: "Task deleted",
         description: `"${deletedTaskDescription}" has been removed.`,
+      });
+      recordTaskEvent({
+        task_id: taskToDelete.id,
+        task_text: taskToDelete.text,
+        event_type: "deleted",
+        timestamp: new Date().toISOString(),
+      }).then(response => {
+        console.log('AI History: Task deletion event recorded:', response);
+      }).catch(error => {
+        console.error('AI History: Error recording task deletion event:', error);
       });
     } else {
       console.warn(`Task with ID ${id} not found for deletion.`);
@@ -251,6 +260,17 @@ export default function HomePage() {
         toast({
           title: "Task updated!",
           description: `"${originalTaskText}" changed to "${newText}".`,
+        });
+        recordTaskEvent({
+          task_id: id,
+          task_text: originalTaskText, // Send original text for context, new text is separate
+          event_type: "text_updated",
+          new_text: newText,
+          timestamp: new Date().toISOString(),
+        }).then(response => {
+          console.log('AI History: Task text update event recorded:', response);
+        }).catch(error => {
+          console.error('AI History: Error recording task text update event:', error);
         });
     } else { 
         toast({
@@ -284,11 +304,16 @@ export default function HomePage() {
     } catch (error) {
       console.error("Failed to get task insight:", error);
       setInsightData(null); 
-      toast({
-        title: "Error fetching insight",
-        description: "Could not retrieve AI insights for this task. Please try again.",
-        variant: "destructive",
-      });
+      // Error toast is handled by provideTaskInsightFlow if it returns an error structure
+      if (error instanceof Error && error.message.includes("AI service")) {
+         // Already handled by the flow
+      } else {
+        toast({
+          title: "Error fetching insight",
+          description: "Could not retrieve AI insights for this task. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoadingInsight(false);
     }
@@ -301,6 +326,19 @@ export default function HomePage() {
         text: `Sub-task for "${parentTaskText}": ${text}`,
         completed: false,
       }));
+      // Record creation event for each new sub-task
+      newSubTasks.forEach(task => {
+        recordTaskEvent({
+          task_id: task.id,
+          task_text: task.text,
+          event_type: "created",
+          timestamp: new Date().toISOString(),
+        }).then(response => {
+          console.log('AI History: Sub-task creation event recorded:', response);
+        }).catch(error => {
+          console.error('AI History: Error recording sub-task creation event:', error);
+        });
+      });
       return [...newSubTasks, ...prevTasks];
     });
     const successMessage = `${subTaskTexts.length} sub-task(s) related to "${parentTaskText}" added to your list.`;
@@ -314,7 +352,14 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col flex-grow">
-      <Header onClearList={handleClearList} taskCount={isMounted ? tasks.length : 0} />
+      <Header onClearList={() => { 
+        // Manually trigger AI-like response for header button
+        handleListCreated({ 
+          taskList: [], 
+          reasoning: tasks.length > 0 ? "Okay, I've cleared all tasks from your list." : "Your list is already empty.", 
+          action: "clear_all_tasks" 
+        });
+      }} taskCount={isMounted ? tasks.length : 0} />
       <main className="container mx-auto px-4 py-6 flex-grow flex flex-col gap-6">
         <TaskForm
           onListCreated={handleListCreated}

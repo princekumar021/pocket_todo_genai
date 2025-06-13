@@ -3,9 +3,9 @@
 
 /**
  * @fileOverview This file defines a Genkit flow for creating a task list from a user prompt
- * or recognizing a command to clear the task list or mark all tasks as complete.
+ * or recognizing a command to clear the task list, mark all tasks as complete, or answer a query about task count.
  *
- * - createTasklist - A function that takes a user prompt and returns a structured to-do list or signals an action.
+ * - createTasklist - A function that takes a user prompt and returns a structured to-do list or signals an action/query response.
  * - CreateTaskListInput - The input type for the createTasklist function.
  * - CreateTaskListOutput - The return type for the createTasklist function, including a possible 'action'.
  */
@@ -18,28 +18,28 @@ import {z} from 'genkit';
  * @property {string} prompt - A user's natural language request for tasks or a command.
  */
 const CreateTaskListInputSchema = z.object({
-  prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list, or a command like "delete all tasks" or "complete all tasks".'),
+  prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list, or a command like "delete all tasks", "complete all tasks", or a query like "how many tasks do I have?".'),
 });
 export type CreateTaskListInput = z.infer<typeof CreateTaskListInputSchema>;
 
 /**
  * Defines the output schema for the task creation flow.
- * @property {string[]} taskList - The generated list of tasks. Empty if a 'clear_all_tasks' or 'complete_all_tasks' action is specified.
+ * @property {string[]} taskList - The generated list of tasks. Empty if 'clear_all_tasks', 'complete_all_tasks', or 'query_task_count' action is specified.
  * @property {string} [reasoning] - A friendly message to the user explaining the result or any issues.
- * @property {"add_tasks" | "clear_all_tasks" | "complete_all_tasks"} [action] - The intended action based on the prompt. Defaults to 'add_tasks'.
+ * @property {"add_tasks" | "clear_all_tasks" | "complete_all_tasks" | "query_task_count"} [action] - The intended action or query type based on the prompt. Defaults to 'add_tasks'.
  */
 const CreateTaskListOutputSchema = z.object({
-  taskList: z.array(z.string()).describe('An array of task strings. Contains tasks if action is "add_tasks", or an empty array if action is "clear_all_tasks", "complete_all_tasks", or if no tasks were generated.'),
-  reasoning: z.string().optional().describe('A brief, friendly message for the user, summarizing what was done or explaining any issues encountered.'),
-  action: z.enum(["add_tasks", "clear_all_tasks", "complete_all_tasks"]).optional().describe("The intended action based on the prompt. Defaults to 'add_tasks' if not specified or if the prompt is for task creation."),
+  taskList: z.array(z.string()).describe('An array of task strings. Contains tasks if action is "add_tasks", or an empty array if action is "clear_all_tasks", "complete_all_tasks", "query_task_count", or if no tasks were generated.'),
+  reasoning: z.string().optional().describe('A brief, friendly message for the user, summarizing what was done, answering a query, or explaining any issues encountered.'),
+  action: z.enum(["add_tasks", "clear_all_tasks", "complete_all_tasks", "query_task_count"]).optional().describe("The intended action or query type based on the prompt. Defaults to 'add_tasks' if not specified or if the prompt is for task creation."),
 });
 export type CreateTaskListOutput = z.infer<typeof CreateTaskListOutputSchema>;
 
 /**
- * A wrapper function that executes the Genkit flow to create a task list or process a command.
+ * A wrapper function that executes the Genkit flow to create a task list or process a command/query.
  * This provides a clean, standard async function interface for consumers.
  * @param {CreateTaskListInput} input - The user's prompt.
- * @returns {Promise<CreateTaskListOutput>} A promise that resolves to the structured task list or action.
+ * @returns {Promise<CreateTaskListOutput>} A promise that resolves to the structured task list or action/query response.
  */
 export async function createTasklist(input: CreateTaskListInput): Promise<CreateTaskListOutput> {
   return createTasklistFlow(input);
@@ -50,7 +50,7 @@ const prompt = ai.definePrompt({
   input: {schema: CreateTaskListInputSchema},
   output: {schema: CreateTaskListOutputSchema},
   prompt: `
-You are an expert personal assistant that converts user requests into structured to-do lists OR recognizes specific commands.
+You are an expert personal assistant that converts user requests into structured to-do lists OR recognizes specific commands OR answers specific queries.
 
 Your main goal is to determine the user's intent based on their prompt.
 
@@ -59,7 +59,7 @@ You MUST respond with a JSON object adhering to the 'CreateTaskListOutputSchema'
 The schema includes:
 - 'taskList': An array of strings.
 - 'reasoning': A message for the user.
-- 'action': (Optional) An enum that can be "add_tasks", "clear_all_tasks", or "complete_all_tasks".
+- 'action': (Optional) An enum that can be "add_tasks", "clear_all_tasks", "complete_all_tasks", or "query_task_count".
 
 **Core Logic & Rules (Evaluate in this order of precedence):**
 
@@ -77,8 +77,15 @@ The schema includes:
         *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to mark all tasks as completed. All tasks will be updated."
     *   **Crucially: Do NOT** create a task named "Mark all tasks completed" or similar if the intent is to complete all tasks. This rule is very important.
 
-3.  **Single Conceptual Task Identification (Action: "add_tasks"):**
-    *   If the prompt is NOT a command (as per Rules 1 or 2), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
+3.  **Query - Task Count (Informational):**
+    *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have"):
+        *   Set the 'action' field to "query_task_count".
+        *   The 'taskList' field MUST be an empty array (\`[]\`).
+        *   The 'reasoning' field should be a polite message directing the user to where they can see the count, e.g., "I understand you're asking about your task count! You can see this number displayed at the top of your list." or "You can find the total number of your tasks shown in the header area."
+    *   Do NOT create a task like "How many tasks do I have". This is an informational query.
+
+4.  **Single Conceptual Task Identification (Action: "add_tasks"):**
+    *   If the prompt is NOT a command or query (as per Rules 1, 2, or 3), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
         *   Set the 'action' field to "add_tasks" (or omit it, as "add_tasks" is the default).
         *   The 'taskList' output should contain **ONLY ONE** string. This string should be a concise, actionable rephrasing of the user's request, ideally starting with a verb and properly capitalized.
         *   Examples:
@@ -89,22 +96,22 @@ The schema includes:
         *   The 'reasoning' field should be like: "Okay, I've added '[Rephrased Task Name]' to your list. You can get more details or a breakdown using the info button!"
     *   Do NOT break down a single conceptual task into multiple items in the 'taskList'. The 'info' button for that task will handle detailed breakdowns.
 
-4.  **Multiple Distinct Tasks Intent (Action: "add_tasks"):**
-    *   If the prompt is NOT a command (as per Rules 1 or 2), AND it explicitly asks for a plan involving several separate items, or lists multiple distinct actions:
+5.  **Multiple Distinct Tasks Intent (Action: "add_tasks"):**
+    *   If the prompt is NOT a command or query (as per Rules 1, 2, or 3), AND it explicitly asks for a plan involving several separate items, or lists multiple distinct actions:
         *   Set the 'action' field to "add_tasks" (or omit it).
         *   Break it down into a 'taskList' with multiple strings.
         *   Example: User: "plan my week" -> \`taskList\`: \`["Review weekly goals", "Schedule key meetings", "Allocate time for deep work"]\`, \`action\`: \`"add_tasks"\`
         *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
 
-5.  **Random/Generic Task Generation (Action: "add_tasks"):**
-    *   If the prompt is NOT a command (as per Rules 1 or 2), AND the user asks for a specific number of random, generic, or example tasks (e.g., "give me 10 random tasks", "generate 5 sample tasks", "create 3 tasks for today"):
+6.  **Random/Generic Task Generation (Action: "add_tasks"):**
+    *   If the prompt is NOT a command or query (as per Rules 1, 2, or 3), AND the user asks for a specific number of random, generic, or example tasks (e.g., "give me 10 random tasks", "generate 5 sample tasks", "create 3 tasks for today"):
         *   Set the 'action' field to "add_tasks" (or omit it).
         *   Your 'taskList' output MUST contain that many placeholder tasks, like "Random Task 1", "Random Task 2", etc.
         *   Example: User: "give me 3 random tasks" -> AI \`taskList\`: \`["Random Task 1", "Random Task 2", "Random Task 3"]\`, \`action\`: \`"add_tasks"\`
         *   The 'reasoning' field should be like: "Alright, I've drafted a plan with [Number] tasks for you!"
 
-6.  **Ambiguous Prompts (Default to "add_tasks"):**
-    *   If the prompt is NOT a command (as per Rules 1 or 2), AND it is ambiguous or unclear for list generation (and doesn't fit rules 3, 4, or 5):
+7.  **Ambiguous Prompts (Default to "add_tasks"):**
+    *   If the prompt is NOT a command or query (as per Rules 1, 2, or 3), AND it is ambiguous or unclear for list generation (and doesn't fit rules 4, 5, or 6):
         *   Set the 'action' field to "add_tasks" (or omit it).
         *   Create a single task based on the user's full prompt, but try to capitalize it.
         *   The 'reasoning' field should be: "I've created a task based on your input: '[User's Full Prompt capitalized]'. If this wasn't what you meant, try rephrasing or use the info button for more options."
@@ -115,8 +122,8 @@ The schema includes:
 **Instructions:**
 Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format.
 Ensure 'taskList' is always an array of strings.
-Set the 'action' field appropriately based on the rules above. If no specific command is detected or the intent is task creation, 'action' should be "add_tasks" or can be omitted.
-Prioritize Rules 1 and 2 for command detection.
+Set the 'action' field appropriately based on the rules above. If no specific command or query is detected or the intent is task creation, 'action' should be "add_tasks" or can be omitted.
+Prioritize Rules 1, 2 and 3 for command/query detection.
 `,
 });
 
@@ -139,6 +146,8 @@ const createTasklistFlow = ai.defineFlow(
           reasoning = "Okay, I've processed your request to clear all tasks. Your list will be emptied.";
         } else if (action === "complete_all_tasks") {
           reasoning = "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated accordingly.";
+        } else if (action === "query_task_count") {
+          reasoning = "I understand you're asking about your task count! You can see this number displayed at the top of your list.";
         } else if (taskList.length > 0) {
            if (taskList.length === 1 && action === "add_tasks") {
             reasoning = `Okay, I've added '${taskList[0]}' to your list. You can get more details or a breakdown using the info button!`;
@@ -150,7 +159,7 @@ const createTasklistFlow = ai.defineFlow(
         }
       }
 
-      if ((action === "clear_all_tasks" || action === "complete_all_tasks") && taskList.length > 0) {
+      if ((action === "clear_all_tasks" || action === "complete_all_tasks" || action === "query_task_count") && taskList.length > 0) {
         console.warn(`AI returned action:${action} but non-empty taskList. Overriding taskList to empty.`);
         return { taskList: [], reasoning, action };
       }

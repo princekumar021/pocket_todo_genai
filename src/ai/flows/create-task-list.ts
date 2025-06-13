@@ -16,7 +16,7 @@ import {z} from 'genkit';
 /**
  * Defines the input schema for the task creation flow.
  * @property {string} prompt - A user's natural language request for tasks or a command.
- * @property {number} [currentTaskCount] - The current number of tasks the user has. Used for queries about task count.
+ * @property {number} [currentTaskCount] - The current number of tasks the user has. Used for queries about task count. This might be slightly delayed from the absolute current count if tasks were just added client-side.
  */
 const CreateTaskListInputSchema = z.object({
   prompt: z.string().describe('A prompt describing the tasks to be included in the to-do list, or a command like "delete all tasks", "complete all tasks", or a query like "how many tasks do I have?".'),
@@ -68,24 +68,24 @@ The schema includes:
 
 1.  **Command Detection - Clear List (Highest Precedence):**
     *   If the user's prompt very clearly and directly indicates a desire to delete, clear, or remove all tasks from their list (e.g., "delete all tasks", "clear all my tasks", "remove every task", "empty my list", "clear all task", "clear all the task", "delete all the tasks", "nuke my list", "clear my tasks", "delete my tasks", "wipe tasks"):
-        *   Set the 'action' field to "clear_all_tasks".
+        *   Set the 'action' field to "clear_all_tasks". This is MANDATORY.
         *   The 'taskList' field MUST be an empty array (\`[]\`).
         *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to clear all tasks. Your list will be emptied."
     *   **Crucially: Do NOT** create a task named "Delete all tasks", "Clear all tasks", or similar if the intent is to clear the list. This rule overrides all other rules if a clear command is detected.
 
 2.  **Command Detection - Mark All Tasks Complete (High Precedence):**
     *   If the user's prompt clearly indicates a desire to mark all tasks as completed (e.g., "make all tasks completed", "complete all tasks", "mark all as done", "finish all tasks", "mark all tasks as complete", "make all the task as completed", "complete every task", "mark everything as done", "all tasks done"):
-        *   Set the 'action' field to "complete_all_tasks".
+        *   Set the 'action' field to "complete_all_tasks". This is MANDATORY.
         *   The 'taskList' field MUST be an empty array (\`[]\`).
         *   The 'reasoning' field should confirm the command, e.g., "Okay, I've processed your request to mark all tasks as completed. Your tasks will be updated."
     *   **Crucially: Do NOT** create a task named "Mark all tasks completed" or similar if the intent is to complete all tasks. This rule is very important.
 
 3.  **Query - Task Count (Informational):**
     *   If the user's prompt is a question clearly asking for the number of tasks they have (e.g., "how many tasks do I have?", "what is my task count?", "tell me my task count", "how many todos?", "how many task i have"):
-        *   Set the 'action' field to "query_task_count".
+        *   Set the 'action' field to "query_task_count". THIS IS VERY IMPORTANT. The 'action' MUST be "query_task_count".
         *   The 'taskList' field MUST be an empty array (\`[]\`).
-        *   The 'reasoning' field should indicate that the user is asking for the count, e.g., "You're asking about your task count. The application will provide this information." The client application will construct the final message with the actual count.
-    *   Do NOT create a task like "How many tasks do I have". This is an informational query.
+        *   The 'reasoning' field MUST be exactly: "You're asking about your task count. The application will provide this information." The client application will construct the final message with the actual count.
+    *   Do NOT create a task like "How many tasks do I have". This is an informational query. Ensure 'action' is "query_task_count".
 
 4.  **Single Conceptual Task Identification (Action: "add_tasks"):**
     *   If the prompt is NOT a command or query (as per Rules 1, 2, or 3), AND it describes a single conceptual task (e.g., "buy milk", "get ingredients for a cake", "write a blog post about AI", "plan a 3-day trip to Rome", "i want to make chicken"):
@@ -127,7 +127,7 @@ Prompt: "{{{prompt}}}"
 Respond STRICTLY with a valid JSON object that adheres to the 'CreateTaskListOutputSchema' format.
 Ensure 'taskList' is always an array of strings.
 Set the 'action' field appropriately based on the rules above. If no specific command or query is detected or the intent is task creation, 'action' should be "add_tasks" or can be omitted.
-Prioritize Rules 1, 2 and 3 for command/query detection.
+Prioritize Rules 1, 2 and 3 for command/query detection. For Rule 3 (Task Count Query), it is CRITICAL that the 'action' field is set to "query_task_count".
 `,
 });
 
@@ -140,10 +140,10 @@ const createTasklistFlow = ai.defineFlow(
   async (input: CreateTaskListInput) => {
     try {
       const {output} = await prompt(input);
-      
+
       const taskList = output?.taskList && Array.isArray(output.taskList) ? output.taskList : [];
       let reasoning = output?.reasoning;
-      const action = output?.action || "add_tasks"; 
+      const action = output?.action || "add_tasks";
 
       if (!reasoning) {
         if (action === "clear_all_tasks") {
@@ -163,6 +163,7 @@ const createTasklistFlow = ai.defineFlow(
         }
       }
 
+      // Ensure that if an action implies no tasks, the taskList is empty.
       if ((action === "clear_all_tasks" || action === "complete_all_tasks" || action === "query_task_count") && taskList.length > 0) {
         console.warn(`AI returned action:${action} but non-empty taskList. Overriding taskList to empty.`);
         return { taskList: [], reasoning, action };
@@ -185,7 +186,7 @@ const createTasklistFlow = ai.defineFlow(
       return {
         taskList: [],
         reasoning: userFriendlyMessage,
-        action: "add_tasks" 
+        action: "add_tasks" // Default to add_tasks on error to prevent unexpected clear/complete actions
       };
     }
   }
